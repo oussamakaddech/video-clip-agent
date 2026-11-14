@@ -50,6 +50,28 @@ Copy-Item .env.example .env
 
 ## 2. Utilisation
 
+### 🥇 Mode navigateur — analyser une VOD **sans la télécharger**
+
+```powershell
+clipagent browse --url "https://kick.com/<pseudo>/videos/<id>" --output output_kick
+```
+
+Le projet ouvre la VOD dans **Edge/Chrome**, la balaie, capture uniquement les
+fenêtres utiles, transcribe l'audio en local et rend les clips verticaux.
+Aucun téléchargement de la VOD complète (plusieurs Go) : quelques dizaines de Mo.
+
+```
+storyboard (1 image / 60 s, mouvement mesuré dans la page)
+   → pics de mouvement → fenêtres candidates
+   → capture AUDIO seule (≈ 250 Ko / 30 s) → transcription Whisper locale
+   → l'agent LLM choisit les extraits (titre + hook)
+   → capture AUDIO+VIDÉO des seuls extraits retenus
+   → ffmpeg : 1080×1920 + sous-titres + hook
+```
+
+> **Edge ou Chrome obligatoire** : le Chromium de Playwright n'a pas les codecs
+> H.264 (Kick sert en HLS/H.264). Le projet tente `msedge`, puis `chrome`.
+
 ### Parcours livestream (Kick / VOD longue)
 
 ```powershell

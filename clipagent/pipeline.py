@@ -101,13 +101,15 @@ def write_clip_ass(
     *,
     absolute: bool = True,
     hook_text: str = "",
+    offset: float = 0.0,
 ) -> Path:
     """Écrit un fichier ASS (sous-titres + accroche) pour un extrait.
 
-    L'ASS permet deux styles dans un même fichier : celui des sous-titres et
-    celui du hook TikTok, avec police, taille, position et fond propres.
-    Le rendu passe par libass, qui assure aussi la mise en forme (shaping) des
-    caractères arabes.
+    ``absolute=True`` conserve les horodatages de la source : c'est ce qu'attend
+    le filtre ``subtitles`` quand la découpe se fait en seek de sortie
+    (``-ss`` après ``-i``), car les images filtrées portent encore l'horodatage
+    d'origine. En seek d'entrée, ou sur un fragment téléchargé séparément
+    (``absolute=False``), les temps sont relatifs au fragment (``offset``).
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,8 +139,8 @@ def write_clip_ass(
         if absolute:
             start, end = segment.start, segment.end
         else:
-            start = max(0.0, segment.start - clip.start)
-            end = min(clip.duration, segment.end - clip.start)
+            start = max(0.0, segment.start - clip.start - offset)
+            end = min(clip.duration, segment.end - clip.start - offset)
         if end <= start:
             continue
         text = segment.text.replace("\n", "\\N")
@@ -157,14 +159,16 @@ def write_clip_ass(
         if longest > reference:
             font_size = max(40, int(style.hook_style.size * reference / longest))
         payload = "\\N".join(f"{{\\fs{font_size}}}{line}" for line in lines)
+        hook_start = clip.start if absolute else max(0.0, -offset)
         events.append(
-            f"Dialogue: 1,{_ass_time(clip.start)},{_ass_time(clip.start + style.hook_duration)},"
+            f"Dialogue: 1,{_ass_time(hook_start)},{_ass_time(hook_start + style.hook_duration)},"
             f"Hook,,0,0,0,,{payload}"
         )
 
     if not events:
         events.append(
-            f"Dialogue: 0,{_ass_time(clip.start)},{_ass_time(clip.end)},Sub,,0,0,0,,{clip.title}"
+            f"Dialogue: 0,{_ass_time(clip.start if absolute else 0.0)},"
+            f"{_ass_time((clip.start if absolute else 0.0) + clip.duration)},Sub,,0,0,0,,{clip.title}"
         )
 
     path.write_text("\n".join(header + events) + "\n", encoding="utf-8")
@@ -310,6 +314,105 @@ def render_plan(
     if make_concat and len(rendered) > 1:
         try:
             concat_clips(rendered, out_dir / f"{stem}_best_of.mp4", settings=settings)
+        except FFmpegError as exc:
+            plan.warnings.append(f"Concaténation impossible : {exc}")
+    return plan
+
+
+def render_plan_remote(
+    plan: Plan,
+    url: str,
+    settings: Settings,
+    *,
+    transcript: Transcript | None = None,
+    output_dir: str | Path | None = None,
+    make_concat: bool = True,
+    style: ClipStyle | None = None,
+    cookies_from_browser: str | None = None,
+    padding: float = 2.0,
+) -> Plan:
+    """Rend les extraits **sans télécharger la VOD complète**.
+
+    Pour chaque extrait, seule la plage utile est téléchargée (yt-dlp fait des
+    requêtes HTTP partielles), puis la coupe finale est faite en local.
+    Mode « connexion faible ».
+    """
+    from .download import download_section
+
+    out_dir = Path(output_dir or settings.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = Path(settings.download_dir) / "sections"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    style = style or get_style(settings.style)
+    plan.style = style.name
+
+    rendered: list[str] = []
+    for clip in plan.clips:
+        safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in clip.title)[:48].strip("_") or "extrait"
+        clip_path = out_dir / f"clip_{clip.index:02d}_{safe_title}.mp4"
+        section_start = max(0.0, clip.start - padding)
+        section_end = clip.end + padding
+
+        try:
+            section_file = download_section(
+                url,
+                section_start,
+                section_end,
+                settings=settings,
+                out_dir=cache_dir,
+                cookies_from_browser=cookies_from_browser,
+            )
+        except Exception as exc:  # noqa: BLE001
+            plan.warnings.append(f"Téléchargement du fragment #{clip.index} impossible : {exc}")
+            continue
+
+        # Le fragment téléchargé démarre à section_start : on coupe au bon offset.
+        offset = max(0.0, clip.start - section_start)
+        ass_path: Path | None = None
+        hook_text = ""
+        if transcript is not None:
+            if style.hook_enabled:
+                hook_text = resolve_hook(
+                    clip,
+                    list(transcript.segments),
+                    max_chars=style.hook_max_chars,
+                    uppercase=style.hook_uppercase,
+                )
+            if settings.burn_subtitles or hook_text:
+                ass_path = write_clip_ass(
+                    transcript,
+                    clip,
+                    out_dir / f"clip_{clip.index:02d}.ass",
+                    style,
+                    absolute=False,   # le fragment démarre à 0
+                    hook_text=hook_text,
+                    offset=offset,
+                )
+        clip.hook = hook_text
+        try:
+            render_clip(
+                section_file,
+                clip_path,
+                start=offset,
+                end=offset + clip.duration,
+                settings=settings,
+                subtitles=ass_path,
+                style=style,
+            )
+        except FFmpegError as exc:
+            plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
+            continue
+
+        clip.path = str(clip_path)
+        rendered.append(str(clip_path))
+        try:
+            section_file.unlink(missing_ok=True)   # on ne garde que le clip final
+        except OSError:
+            pass
+
+    if make_concat and len(rendered) > 1:
+        try:
+            concat_clips(rendered, out_dir / "best_of.mp4", settings=settings)
         except FFmpegError as exc:
             plan.warnings.append(f"Concaténation impossible : {exc}")
     return plan

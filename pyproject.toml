@@ -20,7 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 whisper = ["faster-whisper>=1.0", "av<16"]
 download = ["yt-dlp>=2025.1"]
-dev = ["pytest>=8.0", "imageio-ffmpeg>=0.5", "faster-whisper>=1.0", "av<16", "yt-dlp>=2025.1"]
+# 1.49.1 = version de Chromium déjà présente sur ce poste (chromium-1148)
+browser = ["playwright==1.49.1"]
+dev = ["pytest>=8.0", "imageio-ffmpeg>=0.5", "faster-whisper>=1.0", "av<16", "yt-dlp>=2025.1", "playwright==1.49.1"]
 
 [project.scripts]
 clipagent = "clipagent.cli:main"

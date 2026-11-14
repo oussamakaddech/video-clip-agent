@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .config import PROFILES, Settings
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         if needs_transcript:
             p.add_argument("--transcript", required=True, help="Transcription (SRT/VTT)")
         p.add_argument("--url", help="URL de la VOD (Kick/YouTube/Twitch) : téléchargée automatiquement")
+        p.add_argument("--cookies-from-browser", help="chrome|firefox|edge : cookies pour les VOD protégées")
         p.add_argument("--profile", choices=sorted(PROFILES), help="Préréglage (livestream pour les VOD longues)")
         p.add_argument("--style", choices=sorted(STYLES), help="Style visuel des extraits (tiktok, arabic, hype…)")
         p.add_argument("--language", help="Langue du contenu (fr, ar, en…) : pilote le prompt et le style")
@@ -132,24 +134,105 @@ def build_parser() -> argparse.ArgumentParser:
     p_fetch.add_argument("--out", default="downloads", help="Dossier de destination")
     p_fetch.add_argument("--cookies-from-browser", help="chrome|firefox|edge : cookies du navigateur")
     p_fetch.add_argument("--max-height", type=int, default=1080, help="Hauteur maximale (défaut: 1080)")
+    p_fetch.add_argument(
+        "--audio-only",
+        action="store_true",
+        help="Ne télécharger que l'audio (≈ 100 Mo pour 4 h) : idéal pour analyser sans bande passante",
+    )
+    p_fetch.add_argument(
+        "--sections",
+        help="Plages à télécharger uniquement, ex « 120-180,900-940 » (secondes)",
+    )
+
+    p_browse = sub.add_parser(
+        "browse",
+        help="Analyser une VOD dans le navigateur (Edge/Chrome) SANS la télécharger",
+    )
+    p_browse.add_argument("--url", required=True, help="URL de la VOD (Kick, YouTube…)")
+    p_browse.add_argument("--output", default="output", help="Dossier de sortie")
+    p_browse.add_argument("--step", type=float, default=60.0, help="Pas du storyboard en secondes")
+    p_browse.add_argument("--candidates", type=int, default=8, help="Nombre de fenêtres candidates")
+    p_browse.add_argument("--window", type=float, default=35.0, help="Durée d'une fenêtre candidate (s)")
+    p_browse.add_argument("--num-clips", type=int, help="Nombre d'extraits finaux")
+    p_browse.add_argument("--min-clip", type=float, help="Durée minimale d'un extrait")
+    p_browse.add_argument("--max-clip", type=float, help="Durée maximale d'un extrait")
+    p_browse.add_argument("--whisper", default="tiny", help="Modèle Whisper local (tiny, base, small)")
+    p_browse.add_argument("--language", help="Langue de la VOD (auto si absent)")
+    p_browse.add_argument("--channel", default="msedge", choices=["msedge", "chrome", "chromium", "auto"])
+    p_browse.add_argument("--headed", action="store_true", help="Afficher le navigateur (débogage)")
+    p_browse.add_argument("--style", choices=sorted(STYLES), help="Style visuel des extraits")
+    p_browse.add_argument("--instruction", help="Consigne complémentaire pour l'agent")
 
     return parser
 
 
+def cmd_browse(args: argparse.Namespace) -> int:
+    """Analyse une VOD dans le navigateur, sans la télécharger."""
+    from .browser_pipeline import BrowserOptions, analyze_in_browser
+
+    settings = _settings_from_args(args)
+    options = BrowserOptions(
+        step=args.step,
+        candidates=args.candidates,
+        window=args.window,
+        num_clips=args.num_clips or settings.num_clips,
+        min_clip=args.min_clip or settings.min_clip_seconds,
+        max_clip=args.max_clip or settings.max_clip_seconds,
+        whisper_model=args.whisper,
+        language=args.language,
+        channel=args.channel,
+        headless=not args.headed,
+        style=args.style or settings.style,
+    )
+    started = time.time()
+    plan = analyze_in_browser(args.url, settings, options, output_dir=args.output)
+    save_report(plan, args.output)
+    print(f"\n{len([c for c in plan.clips if c.path])} extrait(s) en {(time.time()-started)/60:.1f} min")
+    for clip in plan.clips:
+        state = Path(clip.path).name if clip.path else "(non rendu)"
+        print(f"  #{clip.index} {clip.start:8.1f}s → {clip.end:8.1f}s  {clip.title}  → {state}")
+    for warning in plan.warnings:
+        print(f"  ! {warning}")
+    print(f"Rapport : {Path(args.output) / 'clips_plan.md'}")
+    return 0
+
+
+def _parse_sections(value: str | None) -> list[tuple[float, float]]:
+    """Parse « 120-180,900-940 » → [(120.0, 180.0), (900.0, 940.0)]."""
+    if not value:
+        return []
+    sections: list[tuple[float, float]] = []
+    for chunk in value.replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if "-" not in chunk:
+            raise ValueError(f"Plage invalide : {chunk!r} (attendu : debut-fin)")
+        start, end = chunk.split("-", 1)
+        sections.append((float(start), float(end)))
+    return sections
+
+
 def cmd_fetch(args: argparse.Namespace) -> int:
-    """Télécharge une VOD et affiche le chemin du fichier."""
+    """Télécharge une VOD (complète, audio seul, ou seulement des fragments)."""
     from .download import download
 
     settings = _settings_from_args(args)
+    sections = _parse_sections(getattr(args, "sections", None))
     path = download(
         args.url,
         settings=settings,
         out_dir=args.out,
         cookies_from_browser=args.cookies_from_browser,
         max_height=args.max_height,
+        audio_only=getattr(args, "audio_only", False),
+        sections=sections or None,
     )
-    print(f"VOD téléchargée : {path}")
-    print(f"Suite : clipagent transcribe --video \"{path}\" --output .\\vod.srt --model small")
+    print(f"Téléchargement terminé : {path}")
+    if getattr(args, "audio_only", False):
+        print(f"Suite : clipagent transcribe --video \"{path}\" --output .\\vod.srt --model base")
+    else:
+        print(f"Suite : clipagent transcribe --video \"{path}\" --output .\\vod.srt --model small")
     return 0
 
 
@@ -263,14 +346,32 @@ def cmd_render(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     plan = _plan_from_json(args.plan)
     transcript = load_transcript(args.transcript) if getattr(args, "transcript", None) else None
-    plan = render_plan(
-        plan,
-        args.video,
-        settings,
-        transcript=transcript,
-        output_dir=args.output,
-        make_concat=not args.no_concat,
-    )
+
+    # Mode « connexion faible » : on ne télécharge que les fragments retenus.
+    url = getattr(args, "url", None)
+    if url and not getattr(args, "video", None):
+        from .pipeline import render_plan_remote
+
+        print("Mode distant : téléchargement des seuls extraits retenus…")
+        plan = render_plan_remote(
+            plan,
+            url,
+            settings,
+            transcript=transcript,
+            output_dir=args.output,
+            make_concat=not args.no_concat,
+            cookies_from_browser=getattr(args, "cookies_from_browser", None),
+        )
+    else:
+        video = _resolve_video(args, settings)
+        plan = render_plan(
+            plan,
+            video,
+            settings,
+            transcript=transcript,
+            output_dir=args.output,
+            make_concat=not args.no_concat,
+        )
     save_report(plan, args.output)
     print(f"{len([c for c in plan.clips if c.path])} extrait(s) rendu(s) dans {args.output}")
     for warning in plan.warnings:
@@ -408,6 +509,7 @@ COMMANDS = {
     "info": cmd_info,
     "doctor": cmd_doctor,
     "fetch": cmd_fetch,
+    "browse": cmd_browse,
 }
 
 

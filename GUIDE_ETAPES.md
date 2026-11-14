@@ -2,14 +2,68 @@
 
 Objectif : transformer **une vidéo + sa transcription** en **extraits verticaux sous-titrés**.
 
-Deux parcours : le **parcours court** (vidéo courte) et le **parcours livestream**
-(VOD de plusieurs heures, typiquement Kick).
-
-Durée totale : ~5 minutes de mise en route, puis 1 commande par étape.
+Trois parcours :
+- **parcours navigateur** (le plus simple, aucune VOD téléchargée) ;
+- **parcours livestream** (VOD longue déjà à l'avance) ;
+- **parcours classique** (fichier vidéo local).
 
 ---
 
-## Parcours livestream (Kick) — le cas principal
+## 🥇 Parcours navigateur — sans télécharger la VOD (recommandé)
+
+La VOD est analysée **directement dans Edge/Chrome** : le projet y lit le lecteur,
+balaye la vidéo, capture seulement les fenêtres utiles, transcribe l'audio
+**en local** et rend les clips. Rien de plusieurs Go n'est téléchargé.
+
+```powershell
+cd $HOME\Desktop\video-clip-agent
+.\.venv\Scripts\Activate.ps1
+
+clipagent browse --url "https://kick.com/<pseudo>/videos/<id>" --output output_kick
+```
+
+Options utiles :
+
+| Option | Défaut | Rôle |
+|---|---|---|
+| `--step` | 60 | pas du storyboard (1 image analyse toutes les N s) |
+| `--candidates` | 8 | nombre de fenêtres candidates à capturer |
+| `--window` | 35 | durée d'une fenêtre candidate (s) |
+| `--num-clips` | 6 | nombre d'extraits finaux |
+| `--whisper` | tiny | modèle Whisper local (`base` = plus juste, 3× plus lent) |
+| `--language` | auto | langue de la VOD (`en`, `fr`, `ar`…) |
+| `--channel` | msedge | `msedge`, `chrome`, `chromium`, `auto` |
+| `--headed` | off | afficher le navigateur (débogage) |
+| `--style` | default | style visuel (`tiktok`, `arabic`…) |
+
+### Ce que ça fait, étape par étape
+
+1. **Storyboard** : une image JPEG par `--step` secondes, prélevée dans le
+   lecteur ; le *mouvement* est mesuré dans la page (canvas).
+2. **Pics** : les fenêtres les plus actives sont retenues (bien espacées).
+3. **Audio seul** : chaque fenêtre candidate est capturée (≈ 250 Ko pour 30 s),
+   puis transcrite **en local** par Whisper.
+4. **Choix** : l'agent LLM lit ces transcriptions et retient les meilleurs
+   extraits (titre + hook TikTok).
+5. **Rendu** : seule la fenêtre de chaque extrait retenu est capturée en
+   audio+vidéo, puis ffmpeg la transforme en **1080×1920 sous-titré**.
+
+### Ce qu'il faut savoir
+
+* **Edge ou Chrome est obligatoire** : le Chromium de Playwright n'a pas les
+  codecs H.264 (Kick sert en HLS/H.264) → la lecture échouerait.
+* **Durée** : le storyboard coûte ~2,5 s par image ; chaque capture se fait en
+  temps réel (on ne peut pas accélérer la lecture). Pour une VOD de 3 h :
+  ~15 à 25 min pour 6 extraits.
+* **Qualité** : les clips sont à la résolution servie par le lecteur
+  (souvent 640×360 sur Kick) → le recadrage vertical upscale. Pour une qualité
+  maximale, utilisez le **parcours livestream** (yt-dlp, 1080p) ou forcez la
+  qualité dans le lecteur.
+* **Coût réseau** : quelques dizaines de Mo au total, au lieu de plusieurs Go.
+
+---
+
+## Parcours livestream (Kick) — VOD longue, téléchargement partiel
 
 ```powershell
 cd $HOME\Desktop\video-clip-agent
@@ -18,6 +72,12 @@ cd $HOME\Desktop\video-clip-agent
 # 1. Télécharger la VOD ( Kick, YouTube, Twitch… )
 clipagent fetch --url "https://kick.com/xxxx/videos/123456" --out downloads
 #    → affiche le chemin du fichier téléchargé
+
+# 1 bis. Connexion faible : audio seul (≈ 100 Mo pour 4 h)
+clipagent fetch --url "https://kick.com/xxxx/videos/123456" --out downloads --audio-only
+
+# 1 ter. Connexion faible : uniquement les fragments utiles
+clipagent fetch --url "https://kick.com/xxxx/videos/123456" --out downloads --sections "120-180,900-940"
 
 # 2. Transcrire (Whisper local : rien ne sort de la machine)
 clipagent transcribe --video .\downloads\<fichier>.mp4 --output .\vod.srt --model small --language fr
@@ -41,12 +101,15 @@ clipagent render --plan output\clips_plan.json --video .\downloads\<fichier>.mp4
 | **Choix des moments** | le profil `livestream` demande à l'agent de cibler les pics (réaction, annonce, chiffre, moment drôle, question du chat) et d'ignorer les phases vides. |
 | **Durée des clips** | 25–90 s (format short). Pour des « extraits » de 2–3 min : `--max-clip 180 --min-clip 60`. |
 
-### Variante tout-en-un
+### Variante tout-en-un (mode navigateur)
 
 ```powershell
-clipagent run --url "https://kick.com/…/videos/…" --transcript .\vod.srt --output output --profile livestream
+clipagent browse --url "https://kick.com/…/videos/…" --output output --style tiktok --whisper base
 ```
-(téléchargement + analyse + rendu ; le transcript doit déjà exister)
+
+---
+
+## Parcours livestream (Kick) — VOD longue, téléchargement partiel
 
 ---
 
