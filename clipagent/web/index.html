@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>clipagent — Agent IA de clipping vidéo</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎬</span>
+      <div>
+        <h1>clipagent</h1>
+        <p>Transforme une VOD en extraits verticaux sous-titrés — sans la télécharger.</p>
+      </div>
+    </div>
+    <div class="status" id="health">
+      <span class="dot"></span><span id="health-text">vérification…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Colonne gauche : formulaire -->
+    <section class="panel">
+      <h2>Nouvelle tâche</h2>
+
+      <label class="field">
+        <span>Source</span>
+        <div class="tabs" id="source-tabs">
+          <button class="tab active" data-mode="url">URL de la VOD</button>
+          <button class="tab" data-mode="file">Fichier vidéo</button>
+          <button class="tab" data-mode="transcript">Transcription</button>
+        </div>
+      </label>
+
+      <label class="field hidden" id="field-url">
+        <span>URL (Kick, YouTube, Twitch…)</span>
+        <input type="url" id="input-url" placeholder="https://kick.com/…/videos/…" />
+        <small>La VOD n'est jamais téléchargée en entier : le projet lit le lecteur dans le navigateur.</small>
+      </label>
+
+      <label class="field hidden" id="field-file">
+        <span>Vidéo locale</span>
+        <input type="file" id="input-file" accept="video/*" />
+        <small id="file-name">Aucun fichier sélectionné.</small>
+      </label>
+
+      <label class="field hidden" id="field-transcript">
+        <span>Transcription (.srt / .vtt)</span>
+        <input type="file" id="input-transcript" accept=".srt,.vtt,text/plain" />
+        <small id="transcript-name">Aucun fichier sélectionné.</small>
+      </label>
+
+      <div class="grid2">
+        <label class="field">
+          <span>Style</span>
+          <select id="input-style"></select>
+        </label>
+        <label class="field">
+          <span>Langue</span>
+          <select id="input-language">
+            <option value="">auto</option>
+            <option value="en">anglais</option>
+            <option value="fr">français</option>
+            <option value="ar">arabe</option>
+            <option value="es">espagnol</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="grid3">
+        <label class="field">
+          <span>Extraits</span>
+          <input type="number" id="input-num" min="1" max="20" value="6" />
+        </label>
+        <label class="field">
+          <span>Durée min (s)</span>
+          <input type="number" id="input-min" min="5" max="600" value="45" />
+        </label>
+        <label class="field">
+          <span>Durée max (s)</span>
+          <input type="number" id="input-max" min="10" max="900" value="75" />
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Consigne pour l'agent (optionnel)</span>
+        <textarea id="input-instruction" rows="2" placeholder="ex. cible les moments où il parle de son produit"></textarea>
+      </label>
+
+      <div class="row">
+        <label class="check"><input type="checkbox" id="input-subs" checked /> Sous-titres</label>
+        <label class="check"><input type="checkbox" id="input-facecam" /> Face cam</label>
+        <label class="check"><input type="checkbox" id="input-render" checked /> Rendre les clips</label>
+      </div>
+
+      <button class="primary" id="btn-start">Lancer le clipping</button>
+      <p class="hint" id="start-hint"></p>
+    </section>
+
+    <!-- Colonne droite : suivi + résultats -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Suivi</h2>
+        <span class="badge" id="job-badge">aucune tâche</span>
+      </div>
+
+      <div class="progress"><div class="bar" id="bar"></div></div>
+      <p class="message" id="message">Aucune tâche en cours.</p>
+
+      <details class="logs" id="logs-box" open>
+        <summary>Journal</summary>
+        <pre id="logs"></pre>
+      </details>
+
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span id="footer-note">clipagent — OpenAI Agents SDK · Whisper local · FFmpeg</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -48,7 +48,48 @@ Copy-Item .env.example .env
 # puis renseigner OPENAI_API_KEY=sk-...
 ```
 
-## 2. Utilisation
+## 2. Interface web + API
+
+```powershell
+pip install -e ".[web]"
+clipagent-server                     # http://127.0.0.1:8765
+```
+
+L'interface permet de **lancer un clipping depuis le navigateur** : source
+(URL / fichier / transcription), style, langue, nombre et durée des extraits,
+consigne libre — puis de **suivre l'avancement en direct** (journal, barre de
+progression) et de **prévisualiser/télécharger** chaque extrait ainsi que la
+vidéo best-of.
+
+### API HTTP
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `GET` | `/api/health` | état du service (ffmpeg, Whisper, OpenCV, IA, disque) |
+| `GET` | `/api/styles` | catalogue des styles et des profils |
+| `POST` | `/api/jobs` | crée une tâche → `{id}` |
+| `GET` | `/api/jobs` | liste des tâches |
+| `GET` | `/api/jobs/{id}` | état détaillé (progression, journal, extraits) |
+| `DELETE` | `/api/jobs/{id}` | annule / supprime une tâche |
+| `GET` | `/api/jobs/{id}/events` | suivi en direct (Server-Sent Events) |
+| `GET` | `/api/jobs/{id}/clips/{n}` | télécharge un extrait (MP4) |
+| `GET` | `/api/jobs/{id}/best-of` | télécharge la vidéo best-of |
+| `GET` | `/api/jobs/{id}/report` | rapport Markdown |
+| `GET` | `/api/jobs/{id}/usage` | taille des artefacts sur disque |
+| `POST` | `/api/upload` | téléverse une vidéo / transcription |
+
+Exemple :
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://kick.com/…/videos/…","style":"streamer","num_clips":6,"render":true}'
+```
+
+Chaque tâche tourne dans un **thread** dédié : l'API reste responsive, et le
+progrès est poussé en direct vers l'interface.
+
+## 2b. Utilisation en ligne de commande
 
 ### 🥇 Mode navigateur — analyser une VOD **sans la télécharger**
 
