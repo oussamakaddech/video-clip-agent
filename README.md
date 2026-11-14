@@ -230,16 +230,17 @@ clipagent render --plan output\clips_plan.json --video .\arabe.mp4 --transcript 
 
 Sur les lives, le streamer apparaît souvent dans un coin de l'image. Pour un
 format vertical, ce visage est **redétecté** (OpenCV YuNet) puis **superposé
-en bas**, dans un cercle, sur un fond flouté :
+en bas**, dans un cercle. L'écran est **divisé** :
 
 ```
 ┌──────────────────────┐
-│  contenu (16:9)      │  ← net, en haut
+│  accroche TikTok     │  ← 3 premières secondes
+│  contenu (16:9) net  │  ← 2/3 du haut
 │                      │
+│  sous-titres         │
 ├──────────────────────┤
 │  fond flouté         │
-│         ( ◕ )        │  ← visage du streamer, en cercle
-│      sous-titres     │
+│         ( ◕ )        │  ← 1/3 du bas : visage du streamer
 └──────────────────────┘
 ```
 

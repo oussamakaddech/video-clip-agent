@@ -150,15 +150,22 @@ def write_clip_ass(
     ]
 
     events: list[str] = []
-    # En mode relatif, les temps sont exprimés dans le référentiel du fragment
-    # téléchargé : fragment_start = clip.start - offset.
-    base = (clip.start - offset) if not absolute else 0.0
-    for segment in transcript.window(clip.start, clip.end):
+    # Deux référentiels possibles :
+    #  - absolute=True  : les temps du transcript sont ceux de la SOURCE
+    #    (rendu sur le fichier complet, seek de sortie) ;
+    #  - absolute=False : les temps du transcript sont ceux du FRAGMENT
+    #    (début du fragment = offset), le clip occupant [offset, offset+durée].
+    if absolute:
+        win_start, win_end = clip.start, clip.end
+    else:
+        win_start, win_end = offset, offset + clip.duration
+
+    for segment in transcript.window(win_start, win_end):
         if absolute:
             start, end = segment.start, segment.end
         else:
-            start = max(0.0, segment.start - base)
-            end = min(clip.duration + offset, segment.end - base)
+            start = max(0.0, segment.start)
+            end = min(offset + clip.duration, segment.end)
         if end <= start:
             continue
         text = segment.text.replace("\n", "\\N")
