@@ -152,6 +152,58 @@ Equivalents :
 > Variables d'environnement équivalentes : `CLIPAGENT_BASE_URL`,
 > `CLIPAGENT_MODEL`, `CLIPAGENT_CHAT_COMPLETIONS`, `CLIPAGENT_STRICT_TOOLS`.
 
+## 3c. Styles visuels, hook TikTok et arabe
+
+### Styles
+
+```powershell
+clipagent render --plan output\clips_plan.json --video .\ma-video.mp4 --transcript .\ma-video.srt --style tiktok
+```
+
+| Style | Hook | Zoom | Sous-titres | Usage |
+|---|---|---|---|---|
+| `default` | oui | non | blancs, 48 px | usage général |
+| `tiktok` | oui, en haut | 1,08 | gras, 60 px | format short |
+| `hype` | oui, centré, jaune | 1,12 | capitales | moments forts |
+| `podcast` | non | 1,03 | discrets, 46 px | extrait sobre |
+| `clean` | non | non | fins, 42 px | minimal |
+| `reels` | oui, en haut | 1,05 | gras, 54 px | Reels / Shorts |
+| `arabic` | oui, en haut | non | gras, RTL, 54 px | contenu arabe |
+
+Chaque style contrôle : le recadrage, le zoom progressif, la police, la taille,
+la couleur, le contour, la position et le fond des sous-titres **et** de
+l'accroche. Tout est défini dans `clipagent/styles.py` (un seul endroit à
+modifier pour en ajouter un).
+
+### Hook TikTok
+
+L'agent rédige pour chaque extrait une **accroche de 4 à 9 mots**, affichée
+pendant les 3 premières secondes en gros en haut de l'image :
+
+```
+  LA RÉPONSE TIENT EN
+  UNE PHRASE
+```
+
+* le hook vient de l'agent (outil `propose_clip`, champ `hook`) ;
+* à défaut, il est déduit de la première phrase de l'extrait ;
+* `--no-hook` le désactive, `--hook-duration 4` change sa durée ;
+* la police s'auto-cale pour ne jamais déborder de la largeur.
+
+### Arabe (RTL)
+
+```powershell
+clipagent transcribe --video .\arabe.mp4 --output .\arabe.srt --model small --language ar
+clipagent plan --transcript .\arabe.srt --language ar --style arabic --output output
+clipagent render --plan output\clips_plan.json --video .\arabe.mp4 --transcript .\arabe.srt --style arabic
+```
+
+* le prompt passe en arabe (`title`, `reason`, `hook` en arabe) ;
+* le style `arabic` est choisi automatiquement pour une langue RTL
+  (`ar`, `fa`, `he`, `ur`) ;
+* le rendu passe par **libass** : la mise en forme des lettres (shaping) et
+  l'ordre droite-à-gauche sont corrects, ponctuation arabe comprise (`؟`).
+
 ## 4. Comment l'agent décide
 
 L'agent (OpenAI Agents SDK) ne fait que **proposer** des extraits via l'outil

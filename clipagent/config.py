@@ -85,6 +85,9 @@ class Settings:
     instruction: str = ""
     verbose: bool = False
     profile: str = "default"
+    style: str = "default"
+    hook_enabled: bool = True
+    hook_duration: float = 3.0
     max_chunks: int = 12
     chunk_chars: int = 12_000
     download_dir: Path = Path("downloads")
@@ -119,6 +122,9 @@ class Settings:
             "verbose": _env_bool("CLIPAGENT_VERBOSE"),
             "max_chunks": _env_int("CLIPAGENT_MAX_CHUNKS"),
             "chunk_chars": _env_int("CLIPAGENT_CHUNK_CHARS"),
+            "style": os.getenv("CLIPAGENT_STYLE"),
+            "hook_enabled": _env_bool("CLIPAGENT_HOOK"),
+            "hook_duration": _env_float("CLIPAGENT_HOOK_DURATION"),
         }
         for key, value in env_map.items():
             if value is not None:

@@ -33,6 +33,7 @@ class ClipProposal:
     reason: str = ""
     score: float = 0.5
     tags: list[str] = field(default_factory=list)
+    hook: str = ""
 
     @property
     def duration(self) -> float:
@@ -55,6 +56,7 @@ class Clip:
     reason: str = ""
     score: float = 0.5
     tags: list[str] = field(default_factory=list)
+    hook: str = ""
     path: str | None = None
     thumbnail: str | None = None
 
@@ -72,6 +74,7 @@ class Clip:
             "reason": self.reason,
             "score": round(float(self.score), 3),
             "tags": list(self.tags),
+            "hook": self.hook,
             "path": self.path,
             "thumbnail": self.thumbnail,
         }

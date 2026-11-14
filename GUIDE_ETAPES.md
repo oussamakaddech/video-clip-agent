@@ -129,6 +129,35 @@ Produit dans `output\` :
 | `<video>_01.jpg` | vignette de couverture |
 | `<video>_best_of.mp4` | tous les extraits concaténés |
 
+### Choisir le style et l'accroche
+
+```powershell
+# format TikTok : accroche en haut + zoom + sous-titres gras
+clipagent render --plan output\clips_plan.json --video .\v.mp4 --transcript .\v.srt --style tiktok
+
+# sans accroche, plus sobre
+clipagent render --plan output\clips_plan.json --video .\v.mp4 --transcript .\v.srt --style podcast
+
+# accroche plus longue (5 s)
+clipagent render --plan output\clips_plan.json --video .\v.mp4 --transcript .\v.srt --style tiktok --hook-duration 5
+```
+
+Styles disponibles : `default`, `tiktok`, `hype`, `podcast`, `clean`, `reels`, `arabic`.
+
+### Contenu arabe
+
+```powershell
+clipagent transcribe --video .\arabe.mp4 --output .\arabe.srt --model small --language ar
+clipagent plan --transcript .\arabe.srt --language ar --output output          # style arabe auto
+clipagent render --plan output\clips_plan.json --video .\arabe.mp4 --transcript .\arabe.srt --output output
+```
+
+Le prompt, les titres et l'accroche passent en arabe ; le rendu RTL est correct
+(libass : lettres liées, ordre droite-à-gauche, ponctuation `؟`).
+
+> Si vous avez déjà fait l'étape 3 avant de choisir le style, relancez-la :
+> le style et le hook s'appliquent **au rendu**, pas à l'analyse.
+
 > Si vous avez modifié `clips_plan.json`, c'est **cet extrait-là** qui est rendu :
 > on peut corriger les bornes sans rejouer l'analyse.
 

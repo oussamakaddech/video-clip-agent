@@ -12,7 +12,9 @@ from pathlib import Path
 
 from .config import PROFILES, Settings
 from .ffmpeg import FFmpegError, probe, resolve_ffmpeg
+from .hooks import is_rtl_language
 from .models import Clip, Segment
+from .styles import STYLES, style_for_language
 from .pipeline import Plan, plan_clips, render_plan, save_report
 from .transcript import Transcript, load_transcript
 
@@ -26,6 +28,10 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         "chat_completions": True if getattr(args, "chat_completions", False) else None,
         "strict_tools": False if getattr(args, "non_strict_tools", False) else None,
         "profile": getattr(args, "profile", None),
+        "style": getattr(args, "style", None),
+        "language": getattr(args, "language", None),
+        "hook_enabled": False if getattr(args, "no_hook", False) else None,
+        "hook_duration": getattr(args, "hook_duration", None),
         "max_chunks": getattr(args, "max_chunks", None),
         "min_clip_seconds": getattr(args, "min_clip", None),
         "max_clip_seconds": getattr(args, "max_clip", None),
@@ -36,7 +42,11 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         "burn_subtitles": False if getattr(args, "no_subtitles", False) else None,
         "instruction": getattr(args, "instruction", None),
     }
-    return Settings.from_env(**{k: v for k, v in overrides.items() if v is not None})
+    settings = Settings.from_env(**{k: v for k, v in overrides.items() if v is not None})
+    # Langue RTL sans style explicite → style arabe (police et alignement adaptés).
+    if not getattr(args, "style", None) and is_rtl_language(settings.language):
+        settings.style = style_for_language(settings.language).name
+    return settings
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--transcript", required=True, help="Transcription (SRT/VTT)")
         p.add_argument("--url", help="URL de la VOD (Kick/YouTube/Twitch) : téléchargée automatiquement")
         p.add_argument("--profile", choices=sorted(PROFILES), help="Préréglage (livestream pour les VOD longues)")
+        p.add_argument("--style", choices=sorted(STYLES), help="Style visuel des extraits (tiktok, arabic, hype…)")
+        p.add_argument("--language", help="Langue du contenu (fr, ar, en…) : pilote le prompt et le style")
+        p.add_argument("--no-hook", action="store_true", help="Ne pas incruster l'accroche TikTok")
+        p.add_argument("--hook-duration", type=float, help="Durée de l'accroche en secondes (défaut: 3)")
         p.add_argument("--max-chunks", type=int, help="Nombre maximum de portions de transcript analysées")
         p.add_argument("--output", default="output", help="Dossier de sortie")
         p.add_argument("--model", help="Modèle LLM (défaut: gpt-4o-mini)")
@@ -208,6 +222,7 @@ def _plan_from_json(path: str | Path) -> Plan:
                 reason=str(item.get("reason", "")),
                 score=float(item.get("score", 0.5)),
                 tags=list(item.get("tags", []) or []),
+                hook=str(item.get("hook", "") or ""),
             )
         )
     return plan

@@ -9,8 +9,10 @@ from typing import Any
 
 from .config import Settings
 from .ffmpeg import FFmpegError, concat_clips, probe, render_clip, render_thumbnail
+from .hooks import hook_lines, resolve_hook
 from .models import Clip
 from .selection import heuristic_proposals, validate_proposals
+from .styles import ClipStyle, get_style
 from .transcript import Transcript, format_timestamp, load_transcript
 
 
@@ -25,6 +27,7 @@ class Plan:
     mode: str = "llm"
     model: str | None = None
     chunks: int = 0
+    style: str = "default"
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -35,6 +38,7 @@ class Plan:
             "mode": self.mode,
             "model": self.model,
             "chunks": self.chunks,
+            "style": self.style,
             "warnings": list(self.warnings),
             "clips": [clip.to_dict() for clip in self.clips],
         }
@@ -80,6 +84,93 @@ def write_clip_srt(
     return path
 
 
+def _ass_time(seconds: float) -> str:
+    """Horodatage ASS ``H:MM:SS.cc``."""
+    seconds = max(0.0, float(seconds))
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    rest = seconds % 60
+    return f"{hours}:{minutes:02d}:{rest:05.2f}"
+
+
+def write_clip_ass(
+    transcript: Transcript,
+    clip: Clip,
+    path: str | Path,
+    style,
+    *,
+    absolute: bool = True,
+    hook_text: str = "",
+) -> Path:
+    """Écrit un fichier ASS (sous-titres + accroche) pour un extrait.
+
+    L'ASS permet deux styles dans un même fichier : celui des sous-titres et
+    celui du hook TikTok, avec police, taille, position et fond propres.
+    Le rendu passe par libass, qui assure aussi la mise en forme (shaping) des
+    caractères arabes.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    header = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "PlayResX: 1080",
+        "PlayResY: 1920",
+        "WrapStyle: 0",
+        "ScaledBorderAndShadow: yes",
+        "YCbCr Matrix: TV.709",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+        "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        style.subtitle.to_ass_style("Sub"),
+        style.hook_style.to_ass_style("Hook"),
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+
+    events: list[str] = []
+    for segment in transcript.window(clip.start, clip.end):
+        if absolute:
+            start, end = segment.start, segment.end
+        else:
+            start = max(0.0, segment.start - clip.start)
+            end = min(clip.duration, segment.end - clip.start)
+        if end <= start:
+            continue
+        text = segment.text.replace("\n", "\\N")
+        if style.subtitle.uppercase:
+            text = text.upper()
+        events.append(
+            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Sub,,0,0,0,,{text}"
+        )
+
+    if hook_text:
+        lines = hook_lines(hook_text, max_chars_per_line=max(18, style.hook_max_chars // 2))
+        # Auto-cale : une ligne trop longue réduirait la police pour tenir dans la largeur.
+        longest = max((len(line) for line in lines), default=0)
+        reference = max(18, style.hook_max_chars // 2)
+        font_size = style.hook_style.size
+        if longest > reference:
+            font_size = max(40, int(style.hook_style.size * reference / longest))
+        payload = "\\N".join(f"{{\\fs{font_size}}}{line}" for line in lines)
+        events.append(
+            f"Dialogue: 1,{_ass_time(clip.start)},{_ass_time(clip.start + style.hook_duration)},"
+            f"Hook,,0,0,0,,{payload}"
+        )
+
+    if not events:
+        events.append(
+            f"Dialogue: 0,{_ass_time(clip.start)},{_ass_time(clip.end)},Sub,,0,0,0,,{clip.title}"
+        )
+
+    path.write_text("\n".join(header + events) + "\n", encoding="utf-8")
+    return path
+
+
 def plan_clips(
     video: str | Path | None,
     transcript: Transcript,
@@ -104,6 +195,7 @@ def plan_clips(
         transcript_source=transcript.source,
         duration=media_duration,
         model=settings.model,
+        style=get_style(settings.style).name,
     )
 
     proposals = []
@@ -160,21 +252,40 @@ def render_plan(
     transcript: Transcript | None = None,
     output_dir: str | Path | None = None,
     make_concat: bool = True,
+    style: ClipStyle | None = None,
 ) -> Plan:
-    """Rend chaque extrait (recadré vertical + sous-titres) et les vignettes."""
+    """Rend chaque extrait (recadré vertical + sous-titres + hook) et les vignettes."""
     if not video:
         raise ValueError("Une vidéo est nécessaire pour le rendu.")
     out_dir = Path(output_dir or settings.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = Path(video).stem
+    style = style or get_style(settings.style)
+    plan.style = style.name
 
     rendered: list[str] = []
     for clip in plan.clips:
         safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in clip.title)[:48].strip("_") or "extrait"
         clip_path = out_dir / f"{stem}_{clip.index:02d}_{safe_title}.mp4"
-        srt_path: Path | None = None
-        if settings.burn_subtitles and transcript is not None:
-            srt_path = write_clip_srt(transcript, clip, out_dir / f"{stem}_{clip.index:02d}.srt")
+        ass_path: Path | None = None
+        hook_text = ""
+        if transcript is not None:
+            if style.hook_enabled:
+                hook_text = resolve_hook(
+                    clip,
+                    list(transcript.segments),
+                    max_chars=style.hook_max_chars,
+                    uppercase=style.hook_uppercase,
+                )
+            if settings.burn_subtitles or hook_text:
+                ass_path = write_clip_ass(
+                    transcript,
+                    clip,
+                    out_dir / f"{stem}_{clip.index:02d}.ass",
+                    style,
+                    hook_text=hook_text,
+                )
+        clip.hook = hook_text
         try:
             render_clip(
                 video,
@@ -182,7 +293,8 @@ def render_plan(
                 start=clip.start,
                 end=clip.end,
                 settings=settings,
-                subtitles=srt_path,
+                subtitles=ass_path,
+                style=style,
             )
         except FFmpegError as exc:
             plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")

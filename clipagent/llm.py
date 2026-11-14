@@ -65,6 +65,41 @@ CONTEXTE LIVESTREAM (VOD longue)
 """.strip()
 
 
+HOOK_GUIDANCE = """
+HOOK (accroche des 3 premières secondes — format TikTok / Reels / Shorts)
+Pour chaque extrait, renseigne `hook` : une accroche courte
+- 4 à 9 mots, 45 caractères maximum ;
+- qui donne envie de rester (question, chiffre, promesse, contradiction) ;
+- compréhensible seule, sans le contexte de la vidéo ;
+- dans la langue du contenu de la vidéo ;
+- pas de ponctuation finale, pas d'introduction, pas de nom de l'auteur.
+
+Exemples (français) : « Et si l'IA faisait tout le montage ? », « On a doublé l'engagement en un mois ».
+Exemples (arabe) : « هل يمكن للذكاء الاصطناعي أن يقص الفيديو؟ », « ضاعفنا التفاعل في شهر واحد ».
+""".strip()
+
+
+ARABIC_GUIDANCE = """
+LANGUE : le contenu est en ARABE.
+- Rédige `title`, `reason` et `hook` en arabe.
+- Respecte la ponctuation arabe (، ؟) et n'utilise pas de latin pour les mots arabes.
+- Les timestamps restent en secondes ; le hook doit être en arabe, lisible de droite à gauche.
+""".strip()
+
+
+def instructions_for(settings: Settings) -> str:
+    """Construit les instructions de l'agent selon la langue et le profil."""
+    parts = [AGENT_INSTRUCTIONS]
+    if settings.profile == "livestream":
+        parts.append(LIVESTREAM_GUIDANCE)
+    if settings.hook_enabled:
+        parts.append(HOOK_GUIDANCE)
+    code = (settings.language or "").lower().split("-")[0]
+    if code in {"ar", "fa", "he", "ur"}:
+        parts.append(ARABIC_GUIDANCE)
+    return "\n\n".join(parts)
+
+
 @dataclass
 class AgentContext:
     """Mémoire partagée entre l'agent et ses outils."""
@@ -115,6 +150,7 @@ def _build_tools(context: AgentContext, *, strict: bool = True):
         reason: str = "",
         score: float = 0.5,
         tags: list[str] | None = None,
+        hook: str = "",
     ) -> str:
         """Enregistre une proposition d'extrait (bornes en secondes)."""
         proposal = ClipProposal(
@@ -124,6 +160,7 @@ def _build_tools(context: AgentContext, *, strict: bool = True):
             reason=str(reason),
             score=float(score),
             tags=[str(t) for t in (tags or [])],
+            hook=str(hook),
         )
         count = context.add(proposal)
         return f"Proposition #{count} enregistrée : {proposal.start:.1f}s → {proposal.end:.1f}s « {proposal.title} »."
@@ -162,13 +199,9 @@ def build_agent(settings: Settings, context: AgentContext):
     """Construit l'agent OpenAI Agents SDK."""
     from agents import Agent, ModelSettings
 
-    instructions = AGENT_INSTRUCTIONS
-    if settings.profile == "livestream":
-        instructions = f"{instructions}\n\n{LIVESTREAM_GUIDANCE}"
-
     return Agent(
         name="Highlight Analyst",
-        instructions=instructions,
+        instructions=instructions_for(settings),
         model=resolve_model(settings),
         tools=_build_tools(context, strict=settings.strict_tools),
         model_settings=ModelSettings(

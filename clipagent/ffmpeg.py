@@ -151,6 +151,17 @@ def build_crop_filter(width: int, height: int, *, crop: str | None = "center") -
     )
 
 
+def build_zoom_filter(width: int, height: int, zoom: float, *, fps: int = 25) -> str:
+    """Filtre de zoom progressif (effet Ken Burns) : 1.0 = pas de zoom."""
+    if zoom is None or zoom <= 1.001:
+        return ""
+    step = max(0.0005, (zoom - 1.0) / (fps * 3))
+    return (
+        f"zoompan=z='min(zoom+{step:.5f},{zoom:.3f})':d=1:"
+        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps={fps}"
+    )
+
+
 def build_cut_command(
     ffmpeg: str,
     video: str | Path,
@@ -165,6 +176,8 @@ def build_cut_command(
     fast: bool = False,
     crop: str | None = "center",
     subtitle_size: int | None = None,
+    zoom: float = 1.0,
+    fps: int = 25,
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -180,14 +193,23 @@ def build_cut_command(
     else:
         filters.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:-1:-1,format=yuv420p")
 
+    zoom_filter = build_zoom_filter(width, height, zoom, fps=fps)
+    if zoom_filter:
+        filters.append(zoom_filter)
+
     if subtitles:
         sub_path = escape_filter_path(subtitles)
-        size = subtitle_size if subtitle_size else 14
-        style = (
-            f"FontName=Arial,FontSize={size},PrimaryColour=&H00FFFFFF,"
-            "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=48,Alignment=2"
-        )
-        filters.append(f"subtitles='{sub_path}':force_style='{style}'")
+        is_ass = str(subtitles).lower().endswith(".ass")
+        if is_ass:
+            # Un fichier ASS porte ses propres styles : ne surtout pas les écraser.
+            filters.append(f"subtitles='{sub_path}'")
+        else:
+            size = subtitle_size if subtitle_size else 14
+            style = (
+                f"FontName=Arial,FontSize={size},PrimaryColour=&H00FFFFFF,"
+                "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=48,Alignment=2"
+            )
+            filters.append(f"subtitles='{sub_path}':force_style='{style}'")
 
     command += ["-vf", ",".join(filters)]
     command += [
@@ -255,11 +277,19 @@ def render_clip(
     settings: Settings,
     subtitles: str | Path | None = None,
     fast: bool = False,
+    style=None,
 ) -> Path:
     """Rend un extrait et renvoie le chemin du fichier produit."""
     ffmpeg = resolve_ffmpeg(settings.ffmpeg_binary)
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
+
+    zoom = 1.0
+    crop = "center"
+    if style is not None:
+        zoom = getattr(style, "zoom", 1.0) or 1.0
+        crop = getattr(style, "crop", "center") or "center"
+
     command = build_cut_command(
         ffmpeg,
         video,
@@ -271,7 +301,8 @@ def render_clip(
         aspect=settings.aspect_ratio,
         subtitles=subtitles,
         fast=fast,
-        subtitle_size=settings.subtitle_size,
+        crop=crop,
+        zoom=zoom,
     )
     run(command)
     return output

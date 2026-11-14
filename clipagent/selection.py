@@ -162,6 +162,7 @@ def validate_proposals(
                 reason=(proposal.reason or "").strip(),
                 score=max(0.0, min(1.0, float(proposal.score))),
                 tags=[t.strip() for t in (proposal.tags or []) if str(t).strip()][:8],
+                hook=(proposal.hook or "").strip()[:120],
             )
         )
 
@@ -176,6 +177,7 @@ def validate_proposals(
             reason=clip.reason,
             score=clip.score,
             tags=clip.tags,
+            hook=clip.hook,
         )
         for i, clip in enumerate(selected, start=1)
     ]
