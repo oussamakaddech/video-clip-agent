@@ -120,6 +120,25 @@ def transcribe_media(
     return target
 
 
+def validate_request(request: ClipRequest) -> list[str]:
+    """Vérifie la demande avant de lancer une tâche (retourne les anomalies)."""
+    problems: list[str] = []
+    if not (request.url or request.video_path or request.transcript_path):
+        problems.append("Fournissez une URL, un fichier vidéo ou une transcription.")
+    if request.video_path and not Path(request.video_path).exists():
+        problems.append(f"Vidéo introuvable : {request.video_path}")
+    if request.transcript_path and not Path(request.transcript_path).exists():
+        problems.append(f"Transcription introuvable : {request.transcript_path}")
+    if request.max_clip < request.min_clip:
+        problems.append("La durée maximale doit être supérieure à la durée minimale.")
+    if request.url and not request.url.startswith(("http://", "https://")):
+        problems.append("L'URL doit commencer par http:// ou https://.")
+    free = free_space(".") // (1024 * 1024)
+    if free < 2048:
+        problems.append(f"Espace disque faible : {free} Mo libres.")
+    return problems
+
+
 def analyze(
     request: ClipRequest,
     *,
@@ -128,6 +147,10 @@ def analyze(
 ) -> ClipResult:
     """Analyse une source (URL ou fichier) et produit le plan de clipping."""
     started = time.time()
+    problems = validate_request(request)
+    if problems:
+        raise ValueError(" ; ".join(problems))
+
     settings = request.settings()
     out_dir = Path(output_dir) if output_dir else unique_output_dir("output")
     out_dir.mkdir(parents=True, exist_ok=True)

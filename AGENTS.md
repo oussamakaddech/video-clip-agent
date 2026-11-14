@@ -41,19 +41,25 @@ complète n'est jamais téléchargée.
 ## Modules
 | Fichier | Rôle | Lignes |
 |---|---|---|
-| `cli.py` | parseur d'arguments + dispatch | ~175 |
+| `cli.py` | parseur d'arguments + dispatch | ~180 |
 | `commands.py` | implémentation des 9 commandes | ~430 |
-| `browser.py` | pilotage Chromium (storyboard, capture) | ~380 |
+| `service.py` | **couche de service** (CLI + API), avec callbacks de progression | ~330 |
+| `api/server.py` | API FastAPI (jobs, SSE, téléchargements) + interface web | ~290 |
+| `api/jobs.py` | file de tâches (threads, concurrence bornée, annulation) | ~170 |
+| `api/schemas.py` | modèles de requête/réponse (validation pydantic) | ~70 |
+| `web/` | interface web (HTML/CSS/JS vanilla, sans dépendance) | 3 fichiers |
+| `browser.py` | pilotage Chromium (storyboard, capture, retries) | ~420 |
 | `browser_pipeline.py` | orchestration du mode navigateur | ~480 |
 | `scoring.py` | classement des fenêtres (mouvement + chat) | ~140 |
 | `chat.py` | chat replay Kick (extraction, densité, contexte) | ~190 |
 | `selection.py` | **validation pure** des extraits | ~430 |
-| `ffmpeg.py` | commandes de rendu (coupe, face cam, ASS) | ~490 |
-| `facecam.py` | détection du visage (OpenCV YuNet) | ~215 |
-| `pipeline.py` | pipeline local (plan → rendu → rapport) | ~530 |
-| `llm.py` | agent OpenAI Agents SDK + outils | ~460 |
-| `styles.py` | styles visuels (tiktok, hype, arabic…) | ~230 |
+| `ffmpeg.py` | commandes de rendu (coupe, face cam, ASS, netteté) | ~560 |
+| `facecam.py` | détection du visage (OpenCV YuNet, mobilité) | ~260 |
+| `pipeline.py` | pipeline local (plan → rendu → rapport) | ~430 |
+| `llm.py` | agent OpenAI Agents SDK + outils | ~470 |
+| `styles.py` | styles visuels (tiktok, streamer, arabic…) | ~280 |
 | `hooks.py` | accroche TikTok (nettoyage, découpage) | ~125 |
+| `subtitles.py` | génération ASS (2 styles, 2 référentiels de temps) | ~150 |
 
 ## Commandes
 ```powershell

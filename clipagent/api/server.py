@@ -34,6 +34,7 @@ from ..service import (
     available_styles,
     disk_usage,
     free_space,
+    validate_request,
 )
 from .jobs import Job, JobManager
 from .schemas import ClipJobRequest, HealthResponse, JobSummary
@@ -89,6 +90,39 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
     def styles() -> dict:
         return {"styles": available_styles(), "profiles": available_profiles()}
 
+    @app.get("/api/provider")
+    def provider() -> dict:
+        """État du fournisseur LLM (endpoint, modèle, joignabilité)."""
+        settings = Settings.from_env()
+        info = {
+            "model": settings.model,
+            "base_url": settings.base_url or "https://api.openai.com/v1",
+            "has_key": bool(settings.api_key),
+            "reachable": False,
+            "error": None,
+        }
+        if not settings.api_key:
+            info["error"] = "Aucune clé API : le mode heuristique sera utilisé."
+            return info
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=settings.api_key,
+                base_url=settings.base_url or None,
+                timeout=20.0,
+            )
+            response = client.chat.completions.create(
+                model=settings.model,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=5,
+            )
+            info["reachable"] = True
+            info["reply"] = response.choices[0].message.content
+        except Exception as exc:  # noqa: BLE001
+            info["error"] = f"{exc.__class__.__name__}: {exc}"
+        return info
+
     @app.post("/api/jobs", response_model=JobSummary)
     def create_job(payload: ClipJobRequest) -> JobSummary:
         request = ClipRequest(
@@ -107,6 +141,9 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
             subtitles=payload.subtitles,
             facecam=payload.facecam,
         )
+        problems = validate_request(request)
+        if problems:
+            raise HTTPException(status_code=422, detail=" ; ".join(problems))
         job = manager.submit(request, render=payload.render)
         return JobSummary(
             id=job.id,

@@ -339,25 +339,54 @@ class BrowserAnalyzer:
         *,
         audio_only: bool = False,
         bitrate: int = 2_000_000,
+        retries: int = 2,
+        retry_delay: float = 3.0,
     ) -> Path:
-        """Capture la fenêtre [start, end] depuis le lecteur (sans télécharger la VOD)."""
+        """Capture la fenêtre [start, end] depuis le lecteur (sans télécharger la VOD).
+
+        Une coupure réseau brève pendant le streaming ne doit pas faire
+        échouer toute la tâche : on réessaie quelques fois avec un délai.
+        """
         assert self._page is not None
-        result = self._page.evaluate(
-            JS_CAPTURE,
-            {
-                "start": float(start),
-                "end": float(end),
-                "audioOnly": bool(audio_only),
-                "bitrate": bitrate,
-            },
+        last_error: Exception | None = None
+
+        for attempt in range(retries + 1):
+            try:
+                result = self._page.evaluate(
+                    JS_CAPTURE,
+                    {
+                        "start": float(start),
+                        "end": float(end),
+                        "audioOnly": bool(audio_only),
+                        "bitrate": bitrate,
+                    },
+                )
+                payload = result["base64"] if isinstance(result, dict) else result
+                path = Path(target)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(base64.b64decode(payload))
+                if isinstance(result, dict):
+                    self._say(
+                        f"  capture {start:.0f}→{end:.0f} s : {path.stat().st_size // 1024} Ko "
+                        f"(audio={'oui' if result.get('audio') else 'non'}, "
+                        f"vidéo={'oui' if result.get('video') else 'non'})"
+                    )
+                return path
+            except Exception as exc:  # noqa: BLE001 - on retente
+                last_error = exc
+                if attempt < retries:
+                    self._say(f"  capture échouée ({exc.__class__.__name__}) — nouvelle tentative…")
+                    self._page.wait_for_timeout(int(retry_delay * 1000))
+                    # On relance la lecture : le lecteur peut s'être figé.
+                    try:
+                        self._page.evaluate(
+                            "() => { const v = document.querySelector('video');"
+                            " if (v) { v.muted = false; v.play().catch(()=>{}); } }"
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
+        raise BrowserError(
+            f"Capture impossible ({start:.0f}→{end:.0f} s) après {retries + 1} tentatives : "
+            f"{last_error}"
         )
-        payload = result["base64"] if isinstance(result, dict) else result
-        target = Path(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(base64.b64decode(payload))
-        if isinstance(result, dict):
-            self._say(
-                f"  capture {start:.0f}→{end:.0f} s : {target.stat().st_size // 1024} Ko "
-                f"(audio={'oui' if result.get('audio') else 'non'}, vidéo={'oui' if result.get('video') else 'non'})"
-            )
-        return target

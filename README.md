@@ -89,6 +89,33 @@ curl -X POST http://127.0.0.1:8765/api/jobs \
 Chaque tâche tourne dans un **thread** dédié : l'API reste responsive, et le
 progrès est poussé en direct vers l'interface.
 
+### Robustesse du backend
+
+| Protection | Détail |
+|---|---|
+| **Validation préalable** | source inexistante, URL invalide, durée incohérente, disque < 2 Go → HTTP **422** avec le motif exact (rien ne démarre) |
+| **Concurrence bornée** | 2 tâches navigateur simultanées au maximum (`Semaphore`) : les autres attendent, la machine ne sature pas |
+| **Retries de capture** | une coupure réseau pendant le streaming est retentée 2× avec relance de la lecture |
+| **Annulation** | `DELETE /api/jobs/{id}` interrompt la tâche au prochain point de progression |
+| **Rétention** | `purge(keep=20)` supprime les tâches terminées les plus anciennes |
+| **Diagnostic fournisseur** | `GET /api/provider` teste la joignabilité du modèle (NVIDIA / OpenAI / Ollama) |
+
+### Couche de service
+
+`clipagent/service.py` factorise les opérations (`analyze`, `render`,
+`transcribe_media`, `download_video`) avec un **rappel de progression**
+`on_progress(message, ratio)` : le CLI, l'API et les tests utilisent le même
+code, et l'interface web reçoit l'avancement en direct.
+
+```python
+from clipagent.service import ClipRequest, analyze
+
+result = analyze(
+    ClipRequest(url="https://kick.com/…/videos/…", style="streamer", num_clips=6),
+    on_progress=lambda msg, ratio: print(f"{ratio:5.0%} {msg}"),
+)
+```
+
 ## 2b. Utilisation en ligne de commande
 
 ### 🥇 Mode navigateur — analyser une VOD **sans la télécharger**

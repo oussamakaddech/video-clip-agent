@@ -52,13 +52,19 @@ class Job:
 
 
 class JobManager:
-    """File de tâches : chaque job tourne dans son propre thread."""
+    """File de tâches : chaque job tourne dans son propre thread.
 
-    def __init__(self, output_root: str | Path = "output") -> None:
+    Un contrôle de concurrence évite de lancer plusieurs navigateurs (très
+    gourmand en mémoire) en même temps ; les tâches excédentaires attendent.
+    """
+
+    def __init__(self, output_root: str | Path = "output", *, max_concurrent: int = 2) -> None:
         self.output_root = Path(output_root)
         self.output_root.mkdir(parents=True, exist_ok=True)
+        self.max_concurrent = max(1, int(max_concurrent))
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._slots = threading.Semaphore(self.max_concurrent)
 
     # --- Accès -------------------------------------------------------------
     def get(self, job_id: str) -> Job | None:
@@ -68,6 +74,10 @@ class JobManager:
     def list(self) -> list[Job]:
         with self._lock:
             return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+
+    @property
+    def running(self) -> int:
+        return sum(1 for job in self.list() if job.status in {"queued", "running"})
 
     # --- Cycle de vie -----------------------------------------------------
     def submit(self, request: ClipRequest, *, render: bool = True) -> Job:
@@ -89,6 +99,17 @@ class JobManager:
     def delete(self, job_id: str) -> bool:
         with self._lock:
             return self._jobs.pop(job_id, None) is not None
+
+    def purge(self, keep: int = 20) -> int:
+        """Supprime les tâches terminées les plus anciennes (libère la mémoire)."""
+        with self._lock:
+            finished = [j for j in self._jobs.values() if j.status in {"done", "error", "cancelled"}]
+            finished.sort(key=lambda j: j.created_at)
+            removed = 0
+            for job in finished[:-keep] if len(finished) > keep else []:
+                self._jobs.pop(job.id, None)
+                removed += 1
+            return removed
 
     # --- Exécution --------------------------------------------------------
     def _log(self, job: Job, message: str, ratio: float | None = None) -> None:
@@ -113,10 +134,13 @@ class JobManager:
             self._log(job, message, ratio)
 
         try:
-            result = analyze(job.request, output_dir=out_dir, on_progress=progress)
-            job.plan = result.plan  # type: ignore[attr-defined]
-            if render:
-                result = render_clips(job.request, result.plan, output_dir=out_dir, on_progress=progress)
+            with self._slots:            # concurrence bornée
+                if job.cancelled:
+                    raise JobCancelled()
+                result = analyze(job.request, output_dir=out_dir, on_progress=progress)
+                job.plan = result.plan  # type: ignore[attr-defined]
+                if render:
+                    result = render_clips(job.request, result.plan, output_dir=out_dir, on_progress=progress)
             job.result = result.to_dict()
             job.status = "done"
             job.progress = 1.0
