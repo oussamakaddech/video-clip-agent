@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Environnement
+.env
+
+# Sorties du pipeline
+output/
+*.mp4
+*.srt
+!examples/*.srt
+*.jpg
+*.png
+!docs/*.png
+
+# Outils
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.vscode/
+.idea/

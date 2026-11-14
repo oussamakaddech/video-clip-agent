@@ -1,0 +1,139 @@
+1
+00:00:02,000 --> 00:00:09,500
+Bonjour à tous et bienvenue dans cet épisode sur le clipping vidéo automatisé.
+
+2
+00:00:09,500 --> 00:00:18,200
+Aujourd'hui on va répondre à une question simple : comment transformer une vidéo de quarante minutes en cinq extraits qui donnent envie d'être partagés ?
+
+3
+00:00:18,200 --> 00:00:27,800
+La réponse tient en une phrase : il faut séparer l'analyse de la transcription et le montage.
+
+4
+00:00:27,800 --> 00:00:36,400
+Concrètement, un agent lit la transcription, il repère les moments forts, puis un outil de montage découpe la vidéo.
+
+5
+00:00:36,400 --> 00:00:44,900
+Ce qui change par rapport à un simple coupe-coupe, c'est que l'agent comprend le sens de ce qui se dit.
+
+6
+00:00:44,900 --> 00:00:55,300
+On va commencer par la partie la plus simple : comment on obtient la transcription de la vidéo.
+
+7
+00:00:55,300 --> 00:01:06,700
+Aujourd'hui on utilise Whisper, dans sa version rapide, directement en local sur votre machine.
+
+8
+00:01:06,700 --> 00:01:18,500
+La clé c'est de segmenter : Whisper nous donne des blocs de quelques secondes avec un début et une fin.
+
+9
+00:01:18,500 --> 00:01:29,900
+Ces blocs sont exactement ce dont l'agent a besoin pour proposer des extraits cohérents.
+
+10
+00:01:29,900 --> 00:01:41,200
+Une nuance importante : ne coupez jamais un extrait au milieu d'une phrase, sinon la coupe est incompréhensible.
+
+11
+00:01:41,200 --> 00:01:53,600
+Pour ça, on recale les bornes sur les extrémités des phrases détectées dans la transcription.
+
+12
+00:01:53,600 --> 00:02:04,300
+Voyons maintenant comment l'agent choisit ses extraits.
+
+13
+00:02:04,300 --> 00:02:16,700
+On lui donne un contrat simple : entre vingt et quatre-vingt-dix secondes par extrait, et cinq extraits au total.
+
+14
+00:02:16,700 --> 00:02:29,500
+Et surtout on lui demande un format vertical, parce que c'est là que la vidéo est regardée aujourd'hui.
+
+15
+00:02:29,500 --> 00:02:41,200
+L'agent parcourt la transcription avec des outils : il lit une fenêtre, il en propose une autre s'il le faut.
+
+16
+00:02:41,200 --> 00:02:53,800
+C'est un vrai dialogue avec les données, pas une passe aveugle sur l'ensemble du texte.
+
+17
+00:02:53,800 --> 00:03:05,400
+Voilà ce qui se passe en pratique quand on lance l'analyse sur notre episode.
+
+18
+00:03:05,400 --> 00:03:17,900
+Le premier extrait retenu, c'est celui où je donne la définition du clipping, à la deuxième minute.
+
+19
+00:03:17,900 --> 00:03:29,300
+Il commence par une question, il se termine sur une promesse : c'est la structure idéale pour du court.
+
+20
+00:03:29,300 --> 00:03:41,700
+Le deuxième extrait, c'est le passage sur Whisper, et il commence par « la clé c'est de segmenter ».
+
+21
+00:03:41,700 --> 00:03:53,200
+On voit bien l'importance de la phase de validation : sans elle, l'agent aurait proposé des phrases coupées.
+
+22
+00:03:53,200 --> 00:04:05,600
+Troisième extrait : le moment où je donne les chiffres. Doublé de l'engagement en un mois, c'est le genre de phrase qui arrête le scroll.
+
+23
+00:04:05,600 --> 00:04:18,900
+Et c'est exactement le rôle de l'agent : il ne comprend pas seulement les mots, il comprend l'intention de la phrase.
+
+24
+00:04:18,900 --> 00:04:31,300
+Passons au montage proprement dit, c'est la partie que beaucoup de gens sautent.
+
+25
+00:04:31,300 --> 00:04:43,700
+On utilise FFmpeg, parce que c'est la seule façon fiable de couper sans perdre la synchronisation audio.
+
+26
+00:04:43,700 --> 00:04:56,200
+On coupe précisément, on recadre au format neuf seize, et on incruste les sous-titres de la transcription.
+
+27
+00:04:56,200 --> 00:05:08,600
+Le sous-titrage, c'est ce qui change vraiment le taux de visionnage sur les réseaux sociaux.
+
+28
+00:05:08,600 --> 00:05:21,400
+Petite astuce : on incruste les sous-titres en blanc avec un contour noir, sinon on ne les lit pas sur fond clair.
+
+29
+00:05:21,400 --> 00:05:33,900
+Et on extrait systématiquement une vignette pour chaque extrait, ça sert de couverture dans le rapport.
+
+30
+00:05:33,900 --> 00:05:46,500
+Dernier point : on peut concaténer tous les extraits dans une seule vidéo best-of.
+
+31
+00:05:46,500 --> 00:05:58,200
+C'est pratique pour une newsletter ou pour un récapitulatif de fin de webinaire.
+
+32
+00:05:58,200 --> 00:06:10,700
+Récapitulons : une transcription, un agent qui sélectionne, une validation stricte, et FFmpeg qui rend.
+
+33
+00:06:10,700 --> 00:06:22,300
+Si vous voulez aller plus loin, le point d'entrée à retenir est le suivant.
+
+34
+00:06:22,300 --> 00:06:35,000
+Ce n'est pas l'outil qui fait la valeur, c'est la définition des moments que vous voulez mettre en avant.
+
+35
+00:06:35,000 --> 00:06:47,600
+Merci de votre écoute, et à bientôt pour un nouvel épisode.
