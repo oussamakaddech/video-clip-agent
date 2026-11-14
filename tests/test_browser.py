@@ -56,5 +56,11 @@ def test_browser_pipeline_transcribe_media_requires_file(tmp_path):
     from clipagent.browser_pipeline import transcribe_media
 
     missing = tmp_path / "absent.webm"
-    with pytest.raises(Exception):
+    try:
         transcribe_media(missing, model_name="tiny")
+    except FileNotFoundError:
+        pass          # le média a bien été recherché (fichier absent)
+    except Exception as exc:  # modèle Whisper indisponible (CI hors ligne)
+        pytest.skip(f"Whisper indisponible : {exc.__class__.__name__}")
+    else:
+        pytest.fail("une transcription d'un fichier absent ne devrait pas réussir")
