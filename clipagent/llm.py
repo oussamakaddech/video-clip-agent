@@ -131,7 +131,26 @@ def _build_tools(context: AgentContext, *, strict: bool = True):
             return "Intervalle invalide : end doit être > start."
         if context.duration and end > context.duration:
             end = context.duration
-        return context.transcript.window_text(start, end)
+        window = context.transcript.window(start, end)
+        if window:
+            return context.transcript.window_text(start, end)
+        # Plage vide : on indique la prochaine contenu disponible pour éviter
+        # que l'agent boucle sur des trous.
+        following = [s for s in context.transcript.segments if s.start >= end]
+        if following:
+            nxt = following[0]
+            return (
+                f"Aucun contenu entre {start:.0f} s et {end:.0f} s. "
+                f"Le contenu suivant commence à {nxt.start:.0f} s."
+            )
+        previous = [s for s in context.transcript.segments if s.end <= start]
+        if previous:
+            prev = previous[-1]
+            return (
+                f"Aucun contenu entre {start:.0f} s et {end:.0f} s. "
+                f"Le dernier contenu disponible se termine à {prev.end:.0f} s."
+            )
+        return f"Aucun contenu entre {start:.0f} s et {end:.0f} s."
 
     @function_tool(strict_mode=strict)
     def read_transcript_head(limit: int = 40) -> str:
@@ -220,7 +239,6 @@ def build_user_request(settings: Settings, context: AgentContext, extra_instruct
         f"- Plage couverte par CETTE portion de transcription : "
         f"{context.chunk_start:.1f} s → {context.chunk_end:.1f} s\n"
         f"- Nombre d'extraits souhaité : {context.max_clips}\n"
-        f"- Durée d'un extrait : entre {context.min_clip:.0f} s et {context.max_clip:.0f} s\n"
         f"- Format cible : {settings.aspect_ratio} ({settings.width}x{settings.height})\n"
         f"- Langue : {settings.language}\n\n"
         "TRANSCRIPTION (début) :\n"
@@ -276,7 +294,7 @@ def run_agent(
     *,
     duration: float | None = None,
     extra_instruction: str = "",
-    max_turns: int = 25,
+    max_turns: int = 40,
 ) -> tuple[list[ClipProposal], AgentContext]:
     """Exécute l'agent et renvoie les propositions brutes + le contexte."""
     import os
@@ -381,7 +399,7 @@ def run_agent_chunked(
 
             os.environ.setdefault("OPENAI_AGENTS_DISABLE_TRACING", "1")
         run_config = RunConfig(tracing_disabled=not settings.tracing)
-        _run_agent_sync(agent, request, max_turns=25, run_config=run_config)
+        _run_agent_sync(agent, request, max_turns=max_turns, run_config=run_config)
         all_proposals.extend(context.proposals)
 
     return all_proposals, len(chunks)

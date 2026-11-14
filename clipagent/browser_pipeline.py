@@ -103,10 +103,10 @@ class BrowserOptions:
 
     step: float = 60.0
     candidates: int = 8
-    window: float = 35.0
+    window: float = 80.0
     num_clips: int = 6
-    min_clip: float = 25.0
-    max_clip: float = 90.0
+    min_clip: float = 45.0
+    max_clip: float = 75.0
     whisper_model: str = "tiny"
     language: str | None = None
     channel: str = "msedge"
@@ -145,33 +145,40 @@ def analyze_in_browser(
 
         # --- Étape 3 : audio des fenêtres candidates -----------------------
         segments: list[Segment] = []
+        candidate_spans: list[tuple[float, float]] = []
         for index, peak in enumerate(peaks, start=1):
             start = max(0.0, peak.timestamp - opts.window / 2)
             end = min(duration, peak.timestamp + opts.window / 2)
             if end - start < 5:
                 continue
             audio_path = work_dir / f"cand_{index:02d}.webm"
-            print(f"→ capture audio #{index} ({start:.0f}→{end:.0f} s)", flush=True)
+            print(f"→ capture candidate #{index} ({start:.0f}→{end:.0f} s)", flush=True)
             try:
-                browser.capture(start, end, audio_path, audio_only=True, bitrate=64_000)
+                # Audio + vidéo à faible débit : le fragment pourra être réutilisé
+                # pour le rendu final si l'extrait retenu est inclus dedans.
+                browser.capture(start, end, audio_path, audio_only=False, bitrate=800_000)
             except BrowserError as exc:
                 plan.warnings.append(f"Capture audio impossible ({start:.0f} s) : {exc}")
                 continue
+            candidate_spans.append((start, end))
             try:
                 segments.extend(
                     transcribe_media(
                         audio_path,
                         model_name=opts.whisper_model,
-                        language=opts.language or settings.language if settings.language != "fr" else opts.language,
+                        language=opts.language or (settings.language if settings.language != "fr" else None),
                         offset=start,
                     )
                 )
             except Exception as exc:  # noqa: BLE001
                 plan.warnings.append(f"Transcription impossible ({start:.0f} s) : {exc}")
-            finally:
-                audio_path.unlink(missing_ok=True)
 
         transcript = Transcript(segments=sorted(segments, key=lambda s: s.start), source=url)
+        # Le transcript candidat est conservé : la sélection peut être refaite
+        # (meilleur modèle, consignes différentes) sans re-capturer la vidéo.
+        candidates_path = out_dir / "candidates.srt"
+        candidates_path.write_text(transcript.to_srt(), encoding="utf-8")
+        print(f"  transcript candidat : {candidates_path}", flush=True)
         if not transcript.segments:
             plan.warnings.append("Aucune transcription obtenue : aucun extrait ne peut être proposé.")
             plan.mode = "browser"
@@ -216,17 +223,29 @@ def analyze_in_browser(
         # --- Étape 5 : capture finale + rendu ------------------------------
         rendered: list[str] = []
         for clip in plan.clips:
-            start = max(0.0, clip.start - opts.padding)
-            end = min(duration, clip.end + opts.padding)
-            print(f"→ capture finale #{clip.index} ({start:.0f}→{end:.0f} s)", flush=True)
-            fragment = work_dir / f"clip_{clip.index:02d}.webm"
-            try:
-                browser.capture(start, end, fragment, audio_only=False)
-            except BrowserError as exc:
-                plan.warnings.append(f"Capture de l'extrait #{clip.index} impossible : {exc}")
-                continue
+            # Réutilisation possible d'un fragment déjà capturé (le clip est
+            # entièrement contenu dans une fenêtre candidate) : pas de re-capture.
+            reusable = None
+            for index, (cand_start, cand_end) in enumerate(candidate_spans, start=1):
+                if clip.start >= cand_start and clip.end <= cand_end:
+                    reusable = (work_dir / f"cand_{index:02d}.webm", cand_start)
+                    break
 
-            offset = clip.start - start
+            if reusable is not None:
+                fragment, fragment_start = reusable
+                offset = clip.start - fragment_start
+                print(f"→ extrait #{clip.index} : fragment déjà capturé (offset {offset:.1f} s)", flush=True)
+            else:
+                start = max(0.0, clip.start - opts.padding)
+                end = min(duration, clip.end + opts.padding)
+                fragment = work_dir / f"clip_{clip.index:02d}.webm"
+                print(f"→ capture finale #{clip.index} ({start:.0f}→{end:.0f} s)", flush=True)
+                try:
+                    browser.capture(start, end, fragment, audio_only=False)
+                except BrowserError as exc:
+                    plan.warnings.append(f"Capture de l'extrait #{clip.index} impossible : {exc}")
+                    continue
+                offset = clip.start - start
             clip_segments = transcribe_media(
                 fragment,
                 model_name=opts.whisper_model,
