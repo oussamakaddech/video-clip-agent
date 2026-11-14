@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 import sys
 from pathlib import Path
@@ -18,12 +19,10 @@ def ensure_yt_dlp() -> list[str]:
     found = shutil.which("yt-dlp")
     if found:
         return [found]
-    try:
-        import yt_dlp  # noqa: F401  (vérifie que le module est installé)
-    except ImportError as exc:
+    if importlib.util.find_spec("yt_dlp") is None:
         raise DownloadError(
             "yt-dlp est requis pour télécharger une VOD : pip install yt-dlp"
-        ) from exc
+        )
     return [sys.executable, "-m", "yt_dlp"]
 
 
