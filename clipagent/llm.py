@@ -235,6 +235,41 @@ def build_user_request(settings: Settings, context: AgentContext, extra_instruct
     return request
 
 
+def _run_agent_sync(agent, request: str, *, max_turns: int, run_config):
+    """Exécute l'agent hors de toute boucle d'événements active.
+
+    Playwright (mode synchrone) fait tourner une boucle asyncio dans le thread
+    courant : ``Runner.run_sync`` y refuse de s'exécuter. On déporte donc
+    l'appel dans un thread de travail, où aucune boucle n'est active.
+    """
+    import asyncio
+    import threading
+
+    from agents import Runner
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return Runner.run_sync(agent, request, max_turns=max_turns, run_config=run_config)
+
+    outcome: dict[str, object] = {}
+
+    def worker() -> None:
+        try:
+            outcome["value"] = Runner.run_sync(
+                agent, request, max_turns=max_turns, run_config=run_config
+            )
+        except BaseException as exc:  # noqa: BLE001
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=worker, name="clipagent-agent")
+    thread.start()
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]  # type: ignore[misc]
+    return outcome.get("value")
+
+
 def run_agent(
     transcript: Transcript,
     settings: Settings,
@@ -246,7 +281,7 @@ def run_agent(
     """Exécute l'agent et renvoie les propositions brutes + le contexte."""
     import os
 
-    from agents import RunConfig, Runner
+    from agents import RunConfig
 
     if settings.api_key:
         os.environ.setdefault("OPENAI_API_KEY", settings.api_key)
@@ -265,8 +300,10 @@ def run_agent(
     )
     agent = build_agent(settings, context)
     request = build_user_request(settings, context, extra_instruction)
+    from agents import RunConfig
+
     run_config = RunConfig(tracing_disabled=not settings.tracing)
-    Runner.run_sync(agent, request, max_turns=max_turns, run_config=run_config)
+    _run_agent_sync(agent, request, max_turns=max_turns, run_config=run_config)
     return context.proposals, context
 
 
@@ -337,14 +374,14 @@ def run_agent_chunked(
         )
         agent = build_agent(settings, context)
         request = build_user_request(settings, context, extra_instruction)
-        from agents import RunConfig, Runner
+        from agents import RunConfig
 
         if not settings.tracing:
             import os
 
             os.environ.setdefault("OPENAI_AGENTS_DISABLE_TRACING", "1")
         run_config = RunConfig(tracing_disabled=not settings.tracing)
-        Runner.run_sync(agent, request, max_turns=25, run_config=run_config)
+        _run_agent_sync(agent, request, max_turns=25, run_config=run_config)
         all_proposals.extend(context.proposals)
 
     return all_proposals, len(chunks)
