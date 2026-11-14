@@ -250,7 +250,47 @@ en bas**, dans un cercle. L'écran est **divisé** :
 * position et taille réglables : `bottom-center` / `bottom-left` / `bottom-right`,
   taille 320 px par défaut.
 
-## 4. Comment l'agent décide
+## 4. Comment l'agent décide (le « niveau de clipping »)
+
+```
+VOD 3 h
+  │
+  ├─ 1. storyboard      1 image JPEG / 60 s, mouvement mesuré dans la page
+  │                    + chat replay lu dans le DOM (signal sémantique gratuit)
+  ├─ 2. classement     score composite = 55 % mouvement + 45 % activité du chat
+  │                    → 8 fenêtres candidates, espacées sur toute la durée
+  ├─ 3. capture        audio+vidéo des seules fenêtres retenues (≈ 10 Mo / 80 s)
+  │                    → transcription Whisper 100 % locale
+  ├─ 4. agent LLM      lit les transcriptions + l'activité du chat
+  │                    → titre, raison, score et hook TikTok par extrait
+  └─ 5. validation     (code pur, jamais le LLM)
+                       · bornes recalées sur les fins de phrases
+                       · durée forcée dans [min, max]
+                       · début ancré sur une phrase « accrocheuse »
+                       · recouvrement < 35 % entre extraits
+                       · titres trop proches écartés (diversité des sujets)
+```
+
+### Les 5 leviers de qualité
+
+| Levier | Effet |
+|---|---|
+| **Ancrage hook** | le début du clip est déplacé vers la première phrase vraiment « accrocheuse » (question, chiffre, annonce) — sinon on perd les 2 premières secondes |
+| **Diversité** | deux extraits qui racontent la même chose (titres trop proches) sont écartés |
+| **Chat replay** | une vague de messages signale un moment fort ; le chat est aussi fourni à l'IA comme contexte |
+| **Fenêtres espacées** | les candidats couvrent toute la durée du live, pas seulement le début |
+| **Score composite** | le classement combine image **et** communauté, pas seulement le mouvement |
+
+### Re-sélectionner sans rien re-capturer
+
+Le transcript des fenêtres retenues est sauvegardé (`candidates.srt`) : on peut
+rejouer la sélection avec d'autres consignes, puis re-rendre **depuis les
+fragments déjà capturés** (30 s au lieu de 25 min) :
+
+```powershell
+clipagent plan --transcript output\candidates.srt --output output --num-clips 6
+clipagent finalize --plan output\clips_plan.json --fragments output\work --output output --style tiktok
+```
 
 L'agent (OpenAI Agents SDK) ne fait que **proposer** des extraits via l'outil
 `propose_clip`. Toute la validation est assurée par `clipagent/selection.py`,

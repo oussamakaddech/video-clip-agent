@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from clipagent.config import Settings
-from clipagent.facecam import FaceBox, detect_face_in_image, detect_face_in_video
+from clipagent.facecam import FaceBox, detect_face_in_image
 from clipagent.ffmpeg import build_facecam_filter_complex, build_cut_command
 from clipagent.styles import STYLES
 

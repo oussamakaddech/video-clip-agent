@@ -53,13 +53,29 @@ clipagent browse --url "…" --style reels            # sans face cam
 
 1. **Storyboard** : une image JPEG par `--step` secondes, prélevée dans le
    lecteur ; le *mouvement* est mesuré dans la page (canvas).
-2. **Pics** : les fenêtres les plus actives sont retenues (bien espacées).
-3. **Audio seul** : chaque fenêtre candidate est capturée (≈ 250 Ko pour 30 s),
-   puis transcrite **en local** par Whisper.
-4. **Choix** : l'agent LLM lit ces transcriptions et retient les meilleurs
-   extraits (titre + hook TikTok).
-5. **Rendu** : seule la fenêtre de chaque extrait retenu est capturée en
-   audio+vidéo, puis ffmpeg la transforme en **1080×1920 sous-titré**.
+2. **Chat replay** : lu dans le DOM (horodatages vidéo) → signal sémantique.
+3. **Classement** : score composite (55 % mouvement + 45 % chat) → `--candidates`
+   fenêtres bien espacées sur toute la durée.
+4. **Capture** : chaque fenêtre candidate est capturée en audio+vidéo à faible
+   débit (≈ 10 Mo / 80 s), puis transcrite **en local** par Whisper.
+5. **Choix** : l'agent LLM lit ces transcriptions (et l'activité du chat) et
+   retient les meilleurs extraits (titre + hook TikTok).
+6. **Validation** : bornes recalées sur les phrases, début ancré sur une phrase
+   accrocheuse, recouvrement et doublons de sujets écartés.
+7. **Rendu** : seule la fenêtre de chaque extrait retenu est capturée en
+   audio+vidéo, puis ffmpeg la transforme en **1080×1920 sous-titré**, avec
+   accroche et face cam.
+
+### Re-sélectionner sans re-capturer (30 s)
+
+```powershell
+clipagent plan --transcript output\candidates.srt --output output --num-clips 6
+clipagent finalize --plan output\clips_plan.json --fragments output\work --output output --style tiktok
+```
+
+`candidates.srt` contient le transcript des fenêtres retenues et `output\work`
+les fragments capturés : la sélection et le rendu peuvent être refaits sans
+toucher au réseau.
 
 ### Ce qu'il faut savoir
 
