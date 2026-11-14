@@ -18,6 +18,9 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
     overrides = {
         "model": args.model,
         "api_key": args.api_key,
+        "base_url": args.base_url,
+        "chat_completions": True if getattr(args, "chat_completions", False) else None,
+        "strict_tools": False if getattr(args, "non_strict_tools", False) else None,
         "min_clip_seconds": args.min_clip,
         "max_clip_seconds": args.max_clip,
         "num_clips": args.num_clips,
@@ -45,7 +48,22 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--transcript", required=True, help="Transcription (SRT/VTT)")
         p.add_argument("--output", default="output", help="Dossier de sortie")
         p.add_argument("--model", help="Modèle LLM (défaut: gpt-4o-mini)")
-        p.add_argument("--api-key", help="Clé OpenAI (défaut: variable OPENAI_API_KEY)")
+        p.add_argument("--api-key", help="Clé API (défaut: OPENAI_API_KEY)")
+        p.add_argument(
+            "--base-url",
+            help="Endpoint compatible OpenAI (NVIDIA: https://integrate.api.nvidia.com/v1, "
+            "Ollama: http://localhost:11434/v1, vLLM: http://localhost:8000/v1)",
+        )
+        p.add_argument(
+            "--chat-completions",
+            action="store_true",
+            help="Forcer l'API Chat Completions (obligatoire pour les endpoints sans /responses)",
+        )
+        p.add_argument(
+            "--non-strict-tools",
+            action="store_true",
+            help="Ne pas envoyer le schéma JSON strict des outils (certains endpoints le refusent)",
+        )
         p.add_argument("--num-clips", type=int, help="Nombre d'extraits (défaut: 5)")
         p.add_argument("--min-clip", type=float, help="Durée minimale en secondes")
         p.add_argument("--max-clip", type=float, help="Durée maximale en secondes")
@@ -74,6 +92,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_trans.add_argument("--output", default="transcript.srt")
     p_trans.add_argument("--model", default="base", help="Modèle Whisper (tiny/base/small/medium/large-v3)")
     p_trans.add_argument("--language", default="fr")
+    p_trans.add_argument("--device", default="auto", help="auto | cpu | cuda")
+    p_trans.add_argument("--compute-type", default="int8", help="int8 | int8_float16 | float16 | float32")
 
     p_info = sub.add_parser("info", help="Afficher les métadonnées d'une vidéo")
     p_info.add_argument("--video", required=True)
@@ -175,7 +195,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    model = WhisperModel(args.model, device="auto", compute_type="int8")
+    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
     segments, info = model.transcribe(args.video, language=args.language, vad_filter=True)
     from .transcript import Transcript
     from .models import Segment

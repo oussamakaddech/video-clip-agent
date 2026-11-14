@@ -90,6 +90,35 @@ Options principales :
 | `<video>_01.jpg` | vignette de couverture |
 | `<video>_best_of.mp4` | concaténation de tous les extraits |
 
+## 3b. Utiliser une autre IA (NVIDIA, Ollama, vLLM…)
+
+Tout endpoint compatible OpenAI fonctionne. Le projet bascule tout seul sur
+l'API **Chat Completions** quand une `base_url` est fournie (l'API `/responses`
+d'OpenAI n'existe pas chez ces fournisseurs).
+
+```powershell
+# NVIDIA NIM (clé nvapi-… depuis https://build.nvidia.com)
+clipagent plan --video .\ma-video.mp4 --transcript .\ma-video.srt `
+  --base-url https://integrate.api.nvidia.com/v1 `
+  --model meta/llama-3.1-70b-instruct `
+  --api-key nvapi-XXXXXXXX `
+  --non-strict-tools
+```
+
+Equivalents :
+
+| Fournisseur | `--base-url` | modèle conseillé |
+|---|---|---|
+| NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `meta/llama-3.1-70b-instruct`, `qwen/qwen2.5-coder-32b-instruct` |
+| Ollama (local) | `http://localhost:11434/v1` | `qwen2.5:14b`, `llama3.1:8b` |
+| vLLM (local) | `http://localhost:8000/v1` | nom du modèle servi |
+| Together / Groq | `https://api.together.xyz/v1`, `https://api.groq.com/openai/v1` | `meta-llama/…`, `llama-3.3-70b-versatile` |
+
+> `--non-strict-tools` : certains endpoints refusent le schéma JSON strict des
+> outils. En cas d'erreur « tool schema », ajoutez cette option.
+> Variables d'environnement équivalentes : `CLIPAGENT_BASE_URL`,
+> `CLIPAGENT_MODEL`, `CLIPAGENT_CHAT_COMPLETIONS`, `CLIPAGENT_STRICT_TOOLS`.
+
 ## 4. Comment l'agent décide
 
 L'agent (OpenAI Agents SDK) ne fait que **proposer** des extraits via l'outil

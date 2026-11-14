@@ -69,11 +69,11 @@ class AgentContext:
         return len(self.proposals)
 
 
-def _build_tools(context: AgentContext):
+def _build_tools(context: AgentContext, *, strict: bool = True):
     """Crée les outils exposés à l'agent (import différé pour ne pas dépendre du SDK)."""
     from agents import function_tool
 
-    @function_tool
+    @function_tool(strict_mode=strict)
     def read_transcript(start: float, end: float) -> str:
         """Lit la transcription entre deux bornes (secondes) et la retourne horodatée."""
         if end <= start:
@@ -82,7 +82,7 @@ def _build_tools(context: AgentContext):
             end = context.duration
         return context.transcript.window_text(start, end)
 
-    @function_tool
+    @function_tool(strict_mode=strict)
     def read_transcript_head(limit: int = 40) -> str:
         """Lit les N premiers segments de la transcription (vue d'ensemble)."""
         limit = max(1, min(int(limit), 400))
@@ -91,7 +91,7 @@ def _build_tools(context: AgentContext):
             f"[{s.start:.2f} - {s.end:.2f}] {s.text}" for s in segments
         )
 
-    @function_tool
+    @function_tool(strict_mode=strict)
     def propose_clip(
         start: float,
         end: float,
@@ -112,13 +112,34 @@ def _build_tools(context: AgentContext):
         count = context.add(proposal)
         return f"Proposition #{count} enregistrée : {proposal.start:.1f}s → {proposal.end:.1f}s « {proposal.title} »."
 
-    @function_tool
+    @function_tool(strict_mode=strict)
     def finish_selection() -> str:
         """Signale la fin de la sélection des extraits."""
         context.finished = True
         return f"Sélection terminée : {len(context.proposals)} proposition(s)."
 
     return [read_transcript, read_transcript_head, propose_clip, finish_selection]
+
+
+def resolve_model(settings: Settings):
+    """Retourne le modèle à utiliser.
+
+    - endpoint OpenAI standard → modèle par défaut du SDK (API Responses) ;
+    - endpoint compatible OpenAI tiers (NVIDIA, Together, vLLM…) → client
+      Chat Completions dédié, car l'API ``/responses`` n'y existe pas.
+    """
+    if not settings.base_url and not settings.chat_completions:
+        return settings.model
+
+    from openai import AsyncOpenAI
+
+    from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+
+    client = AsyncOpenAI(
+        api_key=settings.api_key or "EMPTY",
+        base_url=settings.base_url or None,
+    )
+    return OpenAIChatCompletionsModel(model=settings.model, openai_client=client)
 
 
 def build_agent(settings: Settings, context: AgentContext):
@@ -128,8 +149,8 @@ def build_agent(settings: Settings, context: AgentContext):
     return Agent(
         name="Highlight Analyst",
         instructions=AGENT_INSTRUCTIONS,
-        model=settings.model,
-        tools=_build_tools(context),
+        model=resolve_model(settings),
+        tools=_build_tools(context, strict=settings.strict_tools),
         model_settings=ModelSettings(
             temperature=0.2,
             tool_choice="auto",
@@ -174,6 +195,8 @@ def run_agent(
 
     if settings.api_key:
         os.environ.setdefault("OPENAI_API_KEY", settings.api_key)
+    if settings.base_url:
+        os.environ.setdefault("OPENAI_BASE_URL", settings.base_url)
 
     context = AgentContext(
         transcript=transcript,
