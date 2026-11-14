@@ -272,7 +272,7 @@ def analyze_in_browser(
                 continue
             clip.path = str(out_path)
             rendered.append(str(out_path))
-            fragment.unlink(missing_ok=True)
+            # Le fragment est conservé : il permet de re-rendre sans re-capturer.
             ass_path.unlink(missing_ok=True)
 
     if len(rendered) > 1:
@@ -286,3 +286,88 @@ def analyze_in_browser(
 
 def _safe(text: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in text)[:48].strip("_") or "extrait"
+
+
+def finalize_from_fragments(
+    plan: Plan,
+    fragments_dir: str | Path,
+    settings: Settings,
+    *,
+    transcript: Transcript | None = None,
+    output_dir: str | Path | None = None,
+    padding: float = 1.5,
+    style: ClipStyle | None = None,
+) -> Plan:
+    """Re-rend les clips à partir des fragments déjà capturés (pas de re-capture).
+
+    Utile pour changer de style, corriger le hook ou les sous-titres sans
+    retélécharger quoi que ce soit.
+    """
+    out_dir = Path(output_dir or settings.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fragments = Path(fragments_dir)
+    style = style or get_style(settings.style)
+    plan.style = style.name
+
+    rendered: list[str] = []
+    for clip in plan.clips:
+        fragment = fragments / f"clip_{clip.index:02d}.webm"
+        if not fragment.exists():
+            candidates = sorted(fragments.glob(f"clip_{clip.index:02d}.*"))
+            if not candidates:
+                plan.warnings.append(f"Fragment manquant pour l'extrait #{clip.index} ({fragment}).")
+                continue
+            fragment = candidates[0]
+
+        offset = max(0.0, padding)
+        clip_segments = transcribe_media(
+            fragment,
+            model_name="tiny",
+            language=None,
+        )
+        clip_transcript = Transcript(segments=clip_segments, source=str(fragment))
+
+        hook_text = ""
+        if style.hook_enabled:
+            hook_text = resolve_hook(
+                clip,
+                list(clip_transcript.segments),
+                max_chars=style.hook_max_chars,
+                uppercase=style.hook_uppercase,
+            )
+        clip.hook = hook_text
+
+        ass_path = fragments / f"clip_{clip.index:02d}.ass"
+        write_clip_ass(
+            clip_transcript,
+            clip,
+            ass_path,
+            style,
+            absolute=False,
+            hook_text=hook_text,
+            offset=offset,
+        )
+
+        out_path = out_dir / f"clip_{clip.index:02d}_{_safe(clip.title)}.mp4"
+        try:
+            render_clip(
+                fragment,
+                out_path,
+                start=offset,
+                end=offset + clip.duration,
+                settings=settings,
+                subtitles=ass_path,
+                style=style,
+            )
+        except FFmpegError as exc:
+            plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
+            continue
+        clip.path = str(out_path)
+        rendered.append(str(out_path))
+
+    if len(rendered) > 1:
+        try:
+            concat_clips(rendered, out_dir / "best_of.mp4", settings=settings)
+        except FFmpegError as exc:
+            plan.warnings.append(f"Concaténation impossible : {exc}")
+    return plan

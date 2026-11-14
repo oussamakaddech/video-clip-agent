@@ -163,7 +163,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_browse.add_argument("--style", choices=sorted(STYLES), help="Style visuel des extraits")
     p_browse.add_argument("--instruction", help="Consigne complémentaire pour l'agent")
 
+    p_final = sub.add_parser(
+        "finalize",
+        help="Re-rendre les clips depuis les fragments déjà capturés (mode navigateur)",
+    )
+    p_final.add_argument("--plan", required=True, help="Plan JSON (clips_plan.json)")
+    p_final.add_argument("--fragments", required=True, help="Dossier des fragments capturés")
+    p_final.add_argument("--output", default="output", help="Dossier de sortie")
+    p_final.add_argument("--transcript", help="Transcript SRT/VTT (sinon, sous-titres déduits du fragment)")
+    p_final.add_argument("--style", choices=sorted(STYLES), help="Style visuel")
+    p_final.add_argument("--padding", type=float, default=1.5, help="Marge avant/après (s)")
+
     return parser
+
+
+def cmd_finalize(args: argparse.Namespace) -> int:
+    """Re-rend les clips à partir des fragments capturés (pas de re-capture)."""
+    from .browser_pipeline import finalize_from_fragments
+
+    settings = _settings_from_args(args)
+    plan = _plan_from_json(args.plan)
+    transcript = load_transcript(args.transcript) if getattr(args, "transcript", None) else None
+    plan = finalize_from_fragments(
+        plan,
+        Path(args.fragments),
+        settings,
+        transcript=transcript,
+        output_dir=args.output,
+        padding=args.padding,
+    )
+    save_report(plan, args.output)
+    print(f"{len([c for c in plan.clips if c.path])} extrait(s) re-rendu(s) dans {args.output}")
+    for warning in plan.warnings:
+        print(f"  ! {warning}")
+    return 0
 
 
 def cmd_browse(args: argparse.Namespace) -> int:
@@ -510,6 +543,7 @@ COMMANDS = {
     "doctor": cmd_doctor,
     "fetch": cmd_fetch,
     "browse": cmd_browse,
+    "finalize": cmd_finalize,
 }
 
 

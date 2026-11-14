@@ -135,12 +135,15 @@ def write_clip_ass(
     ]
 
     events: list[str] = []
+    # En mode relatif, les temps sont exprimés dans le référentiel du fragment
+    # téléchargé : fragment_start = clip.start - offset.
+    base = (clip.start - offset) if not absolute else 0.0
     for segment in transcript.window(clip.start, clip.end):
         if absolute:
             start, end = segment.start, segment.end
         else:
-            start = max(0.0, segment.start - clip.start - offset)
-            end = min(clip.duration, segment.end - clip.start - offset)
+            start = max(0.0, segment.start - base)
+            end = min(clip.duration + offset, segment.end - base)
         if end <= start:
             continue
         text = segment.text.replace("\n", "\\N")
@@ -159,16 +162,18 @@ def write_clip_ass(
         if longest > reference:
             font_size = max(40, int(style.hook_style.size * reference / longest))
         payload = "\\N".join(f"{{\\fs{font_size}}}{line}" for line in lines)
-        hook_start = clip.start if absolute else max(0.0, -offset)
+        # L'accroche doit démarrer au début de la coupe (output 0 s).
+        hook_start = clip.start if absolute else offset
         events.append(
             f"Dialogue: 1,{_ass_time(hook_start)},{_ass_time(hook_start + style.hook_duration)},"
             f"Hook,,0,0,0,,{payload}"
         )
 
     if not events:
+        fallback_start = clip.start if absolute else offset
         events.append(
-            f"Dialogue: 0,{_ass_time(clip.start if absolute else 0.0)},"
-            f"{_ass_time((clip.start if absolute else 0.0) + clip.duration)},Sub,,0,0,0,,{clip.title}"
+            f"Dialogue: 0,{_ass_time(fallback_start)},"
+            f"{_ass_time(fallback_start + clip.duration)},Sub,,0,0,0,,{clip.title}"
         )
 
     path.write_text("\n".join(header + events) + "\n", encoding="utf-8")
