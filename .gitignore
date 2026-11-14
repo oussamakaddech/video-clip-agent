@@ -12,7 +12,13 @@ dist/
 
 # Sorties du pipeline
 output/
+output*/
+downloads/
 *.mp4
+*.webm
+*.wav
+*.m4a
+*.mp3
 *.srt
 !examples/*.srt
 *.jpg
