@@ -11,12 +11,12 @@ import sys
 import time
 from pathlib import Path
 
-from .config import PROFILES, Settings
+from .config import Settings
 from .ffmpeg import FFmpegError, probe, resolve_ffmpeg
 from .hooks import is_rtl_language
 from .models import Clip, Segment
 from .pipeline import Plan, plan_clips, render_plan, save_report
-from .styles import STYLES, style_for_language
+from .styles import style_for_language
 from .transcript import Transcript, load_transcript
 
 
@@ -377,7 +377,13 @@ def cmd_browse(args: argparse.Namespace) -> int:
         use_chat=not getattr(args, "no_chat", False),
     )
     started = time.time()
-    plan = analyze_in_browser(args.url, settings, options, output_dir=args.output)
+    plan = analyze_in_browser(
+        args.url,
+        settings,
+        options,
+        output_dir=args.output,
+        instruction=getattr(args, "instruction", "") or "",
+    )
     save_report(plan, args.output)
     print(f"\n{len([c for c in plan.clips if c.path])} extrait(s) en {(time.time()-started)/60:.1f} min")
     for clip in plan.clips:

@@ -19,7 +19,7 @@ def ensure_yt_dlp() -> list[str]:
     if found:
         return [found]
     try:
-        import yt_dlp  # noqa: F401
+        import yt_dlp  # noqa: F401  (vérifie que le module est installé)
     except ImportError as exc:
         raise DownloadError(
             "yt-dlp est requis pour télécharger une VOD : pip install yt-dlp"

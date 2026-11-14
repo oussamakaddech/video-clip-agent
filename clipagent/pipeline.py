@@ -9,7 +9,7 @@ from typing import Any
 
 from .config import Settings
 from .ffmpeg import FFmpegError, concat_clips, probe, render_clip, render_thumbnail
-from .hooks import hook_lines, resolve_hook
+from .hooks import resolve_hook
 from .models import Clip
 from .selection import heuristic_proposals, validate_proposals
 from .styles import ClipStyle, get_style
@@ -93,113 +93,11 @@ def _ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{rest:05.2f}"
 
 
-def _subtitle_style_line(style, *, canvas_height: int = 1920) -> str:
-    """Ligne de style ASS des sous-titres.
+def write_clip_ass(*args, **kwargs):
+    """Raccourci vers ``clipagent.subtitles.write_clip_ass`` (compatibilité)."""
+    from .subtitles import write_clip_ass as _write
 
-    Quand la face cam est active, les sous-titres remontent au-dessus du
-    bandeau du visage (sinon ils passent dessous).
-    """
-    from dataclasses import replace
-
-    subtitle = style.subtitle
-    if getattr(style, "facecam_enabled", False):
-        bottom = int(canvas_height * (1 - getattr(style, "facecam_top_ratio", 0.67)))
-        subtitle = replace(subtitle, margin_v=bottom + 30)
-    return subtitle.to_ass_style("Sub")
-
-
-def write_clip_ass(
-    transcript: Transcript,
-    clip: Clip,
-    path: str | Path,
-    style,
-    *,
-    absolute: bool = True,
-    hook_text: str = "",
-    offset: float = 0.0,
-) -> Path:
-    """Écrit un fichier ASS (sous-titres + accroche) pour un extrait.
-
-    ``absolute=True`` conserve les horodatages de la source : c'est ce qu'attend
-    le filtre ``subtitles`` quand la découpe se fait en seek de sortie
-    (``-ss`` après ``-i``), car les images filtrées portent encore l'horodatage
-    d'origine. En seek d'entrée, ou sur un fragment téléchargé séparément
-    (``absolute=False``), les temps sont relatifs au fragment (``offset``).
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    header = [
-        "[Script Info]",
-        "ScriptType: v4.00+",
-        "PlayResX: 1080",
-        "PlayResY: 1920",
-        "WrapStyle: 0",
-        "ScaledBorderAndShadow: yes",
-        "YCbCr Matrix: TV.709",
-        "",
-        "[V4+ Styles]",
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
-        "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
-        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        _subtitle_style_line(style),
-        style.hook_style.to_ass_style("Hook"),
-        "",
-        "[Events]",
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ]
-
-    events: list[str] = []
-    # Deux référentiels possibles :
-    #  - absolute=True  : les temps du transcript sont ceux de la SOURCE
-    #    (rendu sur le fichier complet, seek de sortie) ;
-    #  - absolute=False : les temps du transcript sont ceux du FRAGMENT
-    #    (début du fragment = offset), le clip occupant [offset, offset+durée].
-    if absolute:
-        win_start, win_end = clip.start, clip.end
-    else:
-        win_start, win_end = offset, offset + clip.duration
-
-    for segment in transcript.window(win_start, win_end):
-        if absolute:
-            start, end = segment.start, segment.end
-        else:
-            start = max(0.0, segment.start)
-            end = min(offset + clip.duration, segment.end)
-        if end <= start:
-            continue
-        text = segment.text.replace("\n", "\\N")
-        if style.subtitle.uppercase:
-            text = text.upper()
-        events.append(
-            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Sub,,0,0,0,,{text}"
-        )
-
-    if hook_text:
-        lines = hook_lines(hook_text, max_chars_per_line=max(18, style.hook_max_chars // 2))
-        # Auto-cale : une ligne trop longue réduirait la police pour tenir dans la largeur.
-        longest = max((len(line) for line in lines), default=0)
-        reference = max(18, style.hook_max_chars // 2)
-        font_size = style.hook_style.size
-        if longest > reference:
-            font_size = max(40, int(style.hook_style.size * reference / longest))
-        payload = "\\N".join(f"{{\\fs{font_size}}}{line}" for line in lines)
-        # L'accroche doit démarrer au début de la coupe (output 0 s).
-        hook_start = clip.start if absolute else offset
-        events.append(
-            f"Dialogue: 1,{_ass_time(hook_start)},{_ass_time(hook_start + style.hook_duration)},"
-            f"Hook,,0,0,0,,{payload}"
-        )
-
-    if not events:
-        fallback_start = clip.start if absolute else offset
-        events.append(
-            f"Dialogue: 0,{_ass_time(fallback_start)},"
-            f"{_ass_time(fallback_start + clip.duration)},Sub,,0,0,0,,{clip.title}"
-        )
-
-    path.write_text("\n".join(header + events) + "\n", encoding="utf-8")
-    return path
+    return _write(*args, **kwargs)
 
 
 def plan_clips(

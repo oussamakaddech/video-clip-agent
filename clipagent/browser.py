@@ -221,8 +221,6 @@ class BrowserAnalyzer:
         return self
 
     def _launch(self):
-        from playwright.sync_api import sync_playwright  # noqa: F401
-
         channels = [self.channel] if self.channel != "auto" else list(BROWSER_CHANNELS)
         last_error: Exception | None = None
         for channel in channels:

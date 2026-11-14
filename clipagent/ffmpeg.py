@@ -208,7 +208,6 @@ def build_facecam_filter_complex(
     if layout == "split":
         # Écran divisé : contenu net sur les 2/3 du haut (fond flouté pour
         # combler la letterbox), visage du streamer dans le 1/3 du bas.
-        top_h = int(height * top_ratio)
         face_y = height - face_size - margin
         parts.append(
             f"[main]split=3[bg][ct][face];"

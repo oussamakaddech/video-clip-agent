@@ -16,16 +16,15 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .browser import BrowserAnalyzer, BrowserError, FrameSample
+from .browser import BrowserAnalyzer, BrowserError
 from .chat import build_chat_context, extract_chat
 from .config import Settings
 from .ffmpeg import FFmpegError, concat_clips, render_clip
 from .hooks import resolve_hook
-from .models import Clip, Segment
+from .models import Segment
 from .pipeline import Plan, write_clip_ass
 from .selection import validate_proposals
 from .styles import ClipStyle, get_style
@@ -33,7 +32,17 @@ from .transcript import Transcript
 
 
 # --- Détection de pics (délégué à clipagent.scoring) -----------------------
-from .scoring import Candidate, detect_peaks, score_candidates  # noqa: E402,F401  (ré-export)
+from .scoring import Candidate, detect_peaks, score_candidates
+
+__all__ = [
+    "BrowserOptions",
+    "Candidate",
+    "analyze_in_browser",
+    "detect_peaks",
+    "finalize_from_fragments",
+    "score_candidates",
+    "transcribe_media",
+]
 
 
 # --- Transcription locale ---------------------------------------------------
@@ -45,8 +54,6 @@ def transcribe_media(
     offset: float = 0.0,
 ) -> list[Segment]:
     """Transcrit un média local (Whisper) et renvoie des segments décalés."""
-    from faster_whisper import WhisperModel
-
     model = _whisper_model(model_name)
     segments, _info = model.transcribe(str(path), language=language, vad_filter=True)
     return [
@@ -93,6 +100,7 @@ def analyze_in_browser(
     options: BrowserOptions | None = None,
     *,
     output_dir: str | Path | None = None,
+    instruction: str = "",
 ) -> Plan:
     """Analyse une VOD dans le navigateur et produit les extraits verticaux."""
     opts = options or BrowserOptions()

@@ -322,8 +322,6 @@ def run_agent(
     )
     agent = build_agent(settings, context)
     request = build_user_request(settings, context, extra_instruction)
-    from agents import RunConfig
-
     run_config = RunConfig(tracing_disabled=not settings.tracing)
     _run_agent_sync(agent, request, max_turns=max_turns, run_config=run_config)
     return context.proposals, context
