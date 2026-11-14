@@ -239,6 +239,10 @@ def build_user_request(settings: Settings, context: AgentContext, extra_instruct
         f"- Plage couverte par CETTE portion de transcription : "
         f"{context.chunk_start:.1f} s → {context.chunk_end:.1f} s\n"
         f"- Nombre d'extraits souhaité : {context.max_clips}\n"
+        f"- Durée d'un extrait : entre {context.min_clip:.0f} s et {context.max_clip:.0f} s\n"
+        f"- Langue de rédaction de `title`, `reason` et `hook` : "
+        f"{settings.language or 'la langue de la transcription'} (si la transcription "
+        "est en anglais, écris en anglais ; si elle est en arabe, écris en arabe)\n"
         f"- Format cible : {settings.aspect_ratio} ({settings.width}x{settings.height})\n"
         f"- Langue : {settings.language}\n\n"
         "TRANSCRIPTION (début) :\n"
@@ -367,6 +371,7 @@ def run_agent_chunked(
     duration: float | None = None,
     extra_instruction: str = "",
     max_chunks: int | None = None,
+    max_turns: int = 40,
 ) -> tuple[list[ClipProposal], int]:
     """Analyse la transcription portion par portion et fusionne les propositions.
 

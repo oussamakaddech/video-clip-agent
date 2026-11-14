@@ -253,6 +253,19 @@ def plan_clips(
     return plan
 
 
+def _detect_face(video: Path, duration: float):
+    """Cherche le visage du streamer dans la source (boîte élargie et carrée)."""
+    try:
+        from .facecam import detect_face_in_video
+
+        box = detect_face_in_video(video, samples=8, duration=max(10.0, duration))
+        if box is None:
+            return None
+        return box.padded(0.6).square()
+    except Exception:  # noqa: BLE001 - la face cam est optionnelle
+        return None
+
+
 def render_plan(
     plan: Plan,
     video: str | Path,
@@ -295,6 +308,11 @@ def render_plan(
                     hook_text=hook_text,
                 )
         clip.hook = hook_text
+        face_box = None
+        if style.facecam_enabled and video:
+            face_box = _detect_face(Path(video), clip.duration)
+            if face_box is None:
+                plan.warnings.append(f"Visage non détecté pour l'extrait #{clip.index} : rendu sans face cam.")
         try:
             render_clip(
                 video,
@@ -304,6 +322,7 @@ def render_plan(
                 settings=settings,
                 subtitles=ass_path,
                 style=style,
+                face_box=face_box,
             )
         except FFmpegError as exc:
             plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")

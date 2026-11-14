@@ -162,6 +162,84 @@ def build_zoom_filter(width: int, height: int, zoom: float, *, fps: int = 25) ->
     )
 
 
+def build_facecam_filter_complex(
+    width: int,
+    height: int,
+    face: "object",
+    *,
+    face_size: int = 320,
+    position: str = "bottom-center",
+    shape: str = "circle",
+    margin: int = 140,
+    content_top: bool = True,
+    subs: str | None = None,
+) -> str:
+    """Chaîne de filtres « face cam » : contenu en haut, visage du streamer en bas.
+
+    - ``content_top`` : la source 16:9 est réduite à la largeur et posée en haut
+      (le bas reste libre pour le visage) ;
+    - ``shape="circle"`` : le visage est détouré en cercle (alpha via ``geq``).
+    """
+    x = int(max(0, face.x))  # type: ignore[attr-defined]
+    y = int(max(0, face.y))  # type: ignore[attr-defined]
+    w = int(max(8, face.width))  # type: ignore[attr-defined]
+    h = int(max(8, face.height))  # type: ignore[attr-defined]
+
+    parts: list[str] = []
+    if content_top:
+        # Fond flouté (copie agrandie) + contenu net en haut : la partie basse
+        # accueille le visage du streamer sans bande noire.
+        parts.append(
+            f"[main]split=3[bg][ct][face];"
+            f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,boxblur=24:3[blurred];"
+            f"[ct]scale={width}:-2[ctop];"
+            f"[blurred][ctop]overlay=0:0[bg2]"
+        )
+        parts.append("[bg2][facec]overlay=" + _overlay_position(position, margin) + "[ov]")
+        face_chain = f"[face]crop={w}:{h}:{x}:{y},scale={face_size}:{face_size}"
+        if shape == "circle":
+            radius = face_size / 2
+            face_chain += (
+                ",format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+                f"a='if(lt(pow(X-{radius:.0f},{2})+pow(Y-{radius:.0f},{2}),{radius * radius:.0f}),255,0)'"
+            )
+        parts.insert(len(parts) - 1, face_chain + "[facec]")
+    else:
+        parts.append(
+            f"[main]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,setsar=1,format=yuv420p[bg]"
+        )
+        face_chain = f"[face]crop={w}:{h}:{x}:{y},scale={face_size}:{face_size}"
+        if shape == "circle":
+            radius = face_size / 2
+            face_chain += (
+                ",format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+                f"a='if(lt(pow(X-{radius:.0f},{2})+pow(Y-{radius:.0f},{2}),{radius * radius:.0f}),255,0)'"
+            )
+        parts.append(face_chain + "[facec]")
+        parts.append("[bg][facec]overlay=" + _overlay_position(position, margin) + "[ov]")
+
+    if subs:
+        sub_path = escape_filter_path(subs)
+        style = (
+            "FontName=Arial,FontSize=48,PrimaryColour=&H00FFFFFF,"
+            "OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,MarginV=90,Alignment=2"
+        )
+        parts.append(f"[ov]subtitles='{sub_path}':force_style='{style}'[v]")
+    else:
+        parts.append("[ov]null[v]")
+    return ";".join(parts)
+
+
+def _overlay_position(position: str, margin: int) -> str:
+    if position == "bottom-left":
+        return f"40:H-h-{margin}"
+    if position == "bottom-right":
+        return f"W-w-40:H-h-{margin}"
+    return f"(W-w)/2:H-h-{margin}"
+
+
 def build_cut_command(
     ffmpeg: str,
     video: str | Path,
@@ -178,6 +256,11 @@ def build_cut_command(
     subtitle_size: int | None = None,
     zoom: float = 1.0,
     fps: int = 25,
+    face_box: object | None = None,
+    face_size: int = 320,
+    face_position: str = "bottom-center",
+    face_shape: str = "circle",
+    face_margin: int = 140,
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -187,31 +270,48 @@ def build_cut_command(
         command += ["-i", str(video), "-ss", f"{max(0.0, start):.3f}"]
     command += ["-t", f"{max(0.1, end - start):.3f}"]
 
-    filters = []
-    if aspect == "9:16":
-        filters.append(build_crop_filter(width, height, crop=crop))
+    if face_box is not None:
+        # Mode face cam : le contenu est réduit et posé en haut, le visage du
+        # streamer est superposé en bas.
+        command += ["-filter_complex", build_facecam_filter_complex(
+            width,
+            height,
+            face_box,
+            face_size=face_size,
+            position=face_position,
+            shape=face_shape,
+            margin=face_margin,
+            content_top=True,
+            subs=subtitles,
+        )]
+        command += ["-map", "[v]", "-map", "0:a?"]
     else:
-        filters.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:-1:-1,format=yuv420p")
-
-    zoom_filter = build_zoom_filter(width, height, zoom, fps=fps)
-    if zoom_filter:
-        filters.append(zoom_filter)
-
-    if subtitles:
-        sub_path = escape_filter_path(subtitles)
-        is_ass = str(subtitles).lower().endswith(".ass")
-        if is_ass:
-            # Un fichier ASS porte ses propres styles : ne surtout pas les écraser.
-            filters.append(f"subtitles='{sub_path}'")
+        filters = []
+        if aspect == "9:16":
+            filters.append(build_crop_filter(width, height, crop=crop))
         else:
-            size = subtitle_size if subtitle_size else 14
-            style = (
-                f"FontName=Arial,FontSize={size},PrimaryColour=&H00FFFFFF,"
-                "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=48,Alignment=2"
-            )
-            filters.append(f"subtitles='{sub_path}':force_style='{style}'")
+            filters.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:-1:-1,format=yuv420p")
 
-    command += ["-vf", ",".join(filters)]
+        zoom_filter = build_zoom_filter(width, height, zoom, fps=fps)
+        if zoom_filter:
+            filters.append(zoom_filter)
+
+        if subtitles:
+            sub_path = escape_filter_path(subtitles)
+            is_ass = str(subtitles).lower().endswith(".ass")
+            if is_ass:
+                # Un fichier ASS porte ses propres styles : ne surtout pas les écraser.
+                filters.append(f"subtitles='{sub_path}'")
+            else:
+                size = subtitle_size if subtitle_size else 14
+                style = (
+                    f"FontName=Arial,FontSize={size},PrimaryColour=&H00FFFFFF,"
+                    "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=48,Alignment=2"
+                )
+                filters.append(f"subtitles='{sub_path}':force_style='{style}'")
+
+        command += ["-vf", ",".join(filters)]
+
     command += [
         "-c:v", "libx264",
         "-preset", "medium",
@@ -278,6 +378,7 @@ def render_clip(
     subtitles: str | Path | None = None,
     fast: bool = False,
     style=None,
+    face_box: object | None = None,
 ) -> Path:
     """Rend un extrait et renvoie le chemin du fichier produit."""
     ffmpeg = resolve_ffmpeg(settings.ffmpeg_binary)
@@ -286,9 +387,17 @@ def render_clip(
 
     zoom = 1.0
     crop = "center"
+    face_size = 320
+    face_position = "bottom-center"
+    face_shape = "circle"
+    face_margin = 140
     if style is not None:
         zoom = getattr(style, "zoom", 1.0) or 1.0
         crop = getattr(style, "crop", "center") or "center"
+        face_size = getattr(style, "facecam_size", 320) or 320
+        face_position = getattr(style, "facecam_position", "bottom-center")
+        face_shape = getattr(style, "facecam_shape", "circle")
+        face_margin = getattr(style, "facecam_margin", 140)
 
     command = build_cut_command(
         ffmpeg,
@@ -303,6 +412,11 @@ def render_clip(
         fast=fast,
         crop=crop,
         zoom=zoom,
+        face_box=face_box,
+        face_size=face_size,
+        face_position=face_position,
+        face_shape=face_shape,
+        face_margin=face_margin,
     )
     run(command)
     return output

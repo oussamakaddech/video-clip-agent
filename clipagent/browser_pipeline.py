@@ -254,6 +254,11 @@ def analyze_in_browser(
             clip_transcript = Transcript(segments=clip_segments, source=str(fragment))
 
             style_used = style
+            face_box = None
+            if style_used.facecam_enabled:
+                face_box = _detect_face(fragment, clip.duration + 2 * opts.padding)
+                if face_box is None:
+                    plan.warnings.append(f"Visage non détecté pour l'extrait #{clip.index} : rendu sans face cam.")
             hook_text = ""
             if style_used.hook_enabled:
                 hook_text = resolve_hook(
@@ -285,6 +290,7 @@ def analyze_in_browser(
                     settings=settings,
                     subtitles=ass_path,
                     style=style_used,
+                    face_box=face_box,
                 )
             except FFmpegError as exc:
                 plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
@@ -301,6 +307,19 @@ def analyze_in_browser(
             plan.warnings.append(f"Concaténation impossible : {exc}")
 
     return plan
+
+
+def _detect_face(fragment: Path, duration: float):
+    """Cherche le visage du streamer dans le fragment (boîte élargie et carrée)."""
+    try:
+        from .facecam import detect_face_in_video
+
+        box = detect_face_in_video(fragment, samples=8, duration=max(10.0, duration))
+        if box is None:
+            return None
+        return box.padded(0.6).square()
+    except Exception:  # noqa: BLE001 - la face cam est optionnelle
+        return None
 
 
 def _safe(text: str) -> str:

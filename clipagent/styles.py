@@ -93,6 +93,12 @@ class ClipStyle:
     hook_uppercase: bool = True
     hook_max_chars: int = 52
     language_hint: str = ""
+    # --- Face cam (visage du streamer superposé en bas) -------------------
+    facecam_enabled: bool = False
+    facecam_size: int = 320
+    facecam_position: str = "bottom-center"   # bottom-center | bottom-left | bottom-right
+    facecam_shape: str = "circle"             # circle | square
+    facecam_margin: int = 140
 
     def is_rtl(self) -> bool:
         return self.subtitle.rtl or self.hook_style.rtl
@@ -123,6 +129,8 @@ STYLES: dict[str, ClipStyle] = {
             primary="#FFFFFF", back="#CC000000", outline_width=0, shadow=0,
         ),
         hook_max_chars=42,
+        facecam_enabled=True,
+        facecam_size=340,
     ),
     "hype": _style(
         "hype",
