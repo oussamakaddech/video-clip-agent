@@ -24,7 +24,7 @@ from .chat import build_chat_context, extract_chat
 from .config import Settings
 from .ffmpeg import FFmpegError, concat_clips, render_clip
 from .hooks import resolve_hook
-from .models import Segment
+from .models import Clip, Segment
 from .pipeline import Plan, write_clip_ass
 from .selection import validate_proposals
 from .styles import ClipStyle, get_style
@@ -351,17 +351,24 @@ def _load_candidate_spans(fragments: Path) -> list[dict]:
     return []
 
 
-def _detect_face(fragment: Path, duration: float):
-    """Cherche le visage du streamer dans le fragment (boîte élargie, carrée, bornée)."""
+def _detect_face(fragment: Path, duration: float, style=None):
+    """Cherche le visage du streamer dans le fragment.
+
+    Selon le style, on renvoie soit la boîte du visage (rendu en cercle), soit
+    la **région caméra** élargie (rendu plein cadre en bas, comme sur la vidéo
+    de référence). La boîte est toujours bornée sur la frame réelle.
+    """
     try:
         from .facecam import detect_face_in_video
 
         box = detect_face_in_video(fragment, samples=8, duration=max(10.0, duration))
         if box is None:
             return None
-        # Les dimensions de la frame sont connues (le lecteur peut changer de
-        # qualité en cours de stream) : la boîte est bornée sur la frame réelle.
-        return box.padded(0.6).square().clamped(box.frame_width, box.frame_height)
+        if style is not None and getattr(style, "facecam_layout", "") == "cam-bottom":
+            region = box.camera_region(getattr(style, "facecam_region", 1.2))
+        else:
+            region = box.padded(0.6).square()
+        return region.clamped(box.frame_width, box.frame_height)
     except Exception:  # noqa: BLE001 - la face cam est optionnelle
         return None
 
@@ -380,11 +387,14 @@ def finalize_from_fragments(
     padding: float = 1.5,
     style: ClipStyle | None = None,
     language: str | None = None,
+    browser_url: str | None = None,
 ) -> Plan:
     """Re-rend les clips à partir des fragments déjà capturés (pas de re-capture).
 
     Utile pour changer de style, corriger le hook ou les sous-titres sans
-    retélécharger quoi que ce soit.
+    retélécharger quoi que ce soit. Si ``browser_url`` est fourni, les clips
+    qui ne sont couverts par aucun fragment existant sont capturés à la
+    demande (mode « connexion faible »).
     """
     out_dir = Path(output_dir or settings.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -396,6 +406,8 @@ def finalize_from_fragments(
     spans = _load_candidate_spans(fragments)
     if os.getenv("CLIPAGENT_DEBUG"):
         print(f"[debug] fragments={fragments} spans={len(spans)}", flush=True)
+
+    missing: list[Clip] = []
     for clip in plan.clips:
         fragment = fragments / f"clip_{clip.index:02d}.webm"
         offset = max(0.0, padding)
@@ -413,72 +425,29 @@ def finalize_from_fragments(
                 print(f"[debug] clip #{clip.index} {clip.start}-{clip.end} -> {fragment}", flush=True)
 
         if not fragment.exists():
-            candidates = sorted(fragments.glob(f"clip_{clip.index:02d}.webm"))
-            if not candidates:
-                plan.warnings.append(f"Fragment manquant pour l'extrait #{clip.index} ({fragment}).")
+            alternatives = sorted(fragments.glob(f"clip_{clip.index:02d}.webm"))
+            if alternatives:
+                fragment = alternatives[0]
+            else:
+                missing.append(clip)
                 continue
-            fragment = candidates[0]
 
-        try:
-            clip_segments = transcribe_media(
-                fragment,
-                model_name="tiny",
-                language=language,
-            )
-        except Exception as exc:  # noqa: BLE001 - le clip reste rendu, sans sous-titres
-            plan.warnings.append(
-                f"Transcription impossible pour l'extrait #{clip.index} ({fragment.name}) : "
-                f"{exc.__class__.__name__}"
-            )
-            clip_segments = []
-        clip_transcript = Transcript(segments=clip_segments, source=str(fragment))
-
-        style_used = style or get_style(settings.style)
-        face_box = None
-        if style_used.facecam_enabled:
-            face_box = _detect_face(fragment, clip.duration)
-            if face_box is None:
-                plan.warnings.append(f"Visage non détecté pour l'extrait #{clip.index} : rendu sans face cam.")
-
-        hook_text = ""
-        if style_used.hook_enabled:
-            hook_text = resolve_hook(
-                clip,
-                list(clip_transcript.segments),
-                max_chars=style_used.hook_max_chars,
-                uppercase=style_used.hook_uppercase,
-            )
-        clip.hook = hook_text
-
-        ass_path = fragments / f"clip_{clip.index:02d}.ass"
-        write_clip_ass(
-            clip_transcript,
-            clip,
-            ass_path,
-            style_used,
-            absolute=False,
-            hook_text=hook_text,
-            offset=offset,
+        rendered_path = _render_from_fragment(
+            clip, fragment, offset, settings, style, fragments, out_dir, language, plan
         )
+        if rendered_path:
+            rendered.append(rendered_path)
 
-        out_path = out_dir / f"clip_{clip.index:02d}_{_safe(clip.title)}.mp4"
-        try:
-            render_clip(
-                fragment,
-                out_path,
-                start=offset,
-                end=offset + clip.duration,
-                settings=settings,
-                subtitles=ass_path,
-                style=style_used,
-                face_box=face_box,
+    # Clips non couverts par un fragment : capture navigateur à la demande.
+    if missing and browser_url:
+        rendered += _render_missing_with_browser(
+            missing, browser_url, settings, style, fragments, out_dir, language, plan
+        )
+    elif missing:
+        for clip in missing:
+            plan.warnings.append(
+                f"Fragment manquant pour l'extrait #{clip.index} : ajoutez --url pour le capturer."
             )
-        except FFmpegError as exc:
-            plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
-            out_path.unlink(missing_ok=True)
-            continue
-        clip.path = str(out_path)
-        rendered.append(str(out_path))
 
     if len(rendered) > 1:
         try:
@@ -486,3 +455,110 @@ def finalize_from_fragments(
         except FFmpegError as exc:
             plan.warnings.append(f"Concaténation impossible : {exc}")
     return plan
+
+
+def _render_from_fragment(
+    clip: Clip,
+    fragment: Path,
+    offset: float,
+    settings: Settings,
+    style: ClipStyle,
+    fragments: Path,
+    out_dir: Path,
+    language: str | None,
+    plan: Plan,
+) -> str | None:
+    """Rend un clip depuis un fragment local (sous-titres + accroche + face cam)."""
+    try:
+        clip_segments = transcribe_media(
+            fragment,
+            model_name="tiny",
+            language=language,
+        )
+    except Exception as exc:  # noqa: BLE001 - le clip reste rendu, sans sous-titres
+        plan.warnings.append(
+            f"Transcription impossible pour l'extrait #{clip.index} ({fragment.name}) : "
+            f"{exc.__class__.__name__}"
+        )
+        clip_segments = []
+    clip_transcript = Transcript(segments=clip_segments, source=str(fragment))
+
+    face_box = None
+    if style.facecam_enabled:
+        face_box = _detect_face(fragment, clip.duration, style)
+        if face_box is None:
+            plan.warnings.append(f"Visage non détecté pour l'extrait #{clip.index} : rendu sans face cam.")
+
+    hook_text = ""
+    if style.hook_enabled:
+        hook_text = resolve_hook(
+            clip,
+            list(clip_transcript.segments),
+            max_chars=style.hook_max_chars,
+            uppercase=style.hook_uppercase,
+        )
+    clip.hook = hook_text
+
+    ass_path = fragments / f"clip_{clip.index:02d}.ass"
+    write_clip_ass(
+        clip_transcript,
+        clip,
+        ass_path,
+        style,
+        absolute=False,
+        hook_text=hook_text,
+        offset=offset,
+    )
+
+    out_path = out_dir / f"clip_{clip.index:02d}_{_safe(clip.title)}.mp4"
+    try:
+        render_clip(
+            fragment,
+            out_path,
+            start=offset,
+            end=offset + clip.duration,
+            settings=settings,
+            subtitles=ass_path,
+            style=style,
+            face_box=face_box,
+        )
+    except FFmpegError as exc:
+        plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
+        out_path.unlink(missing_ok=True)
+        return None
+    clip.path = str(out_path)
+    return str(out_path)
+
+
+def _render_missing_with_browser(
+    clips: list[Clip],
+    url: str,
+    settings: Settings,
+    style: ClipStyle,
+    fragments: Path,
+    out_dir: Path,
+    language: str | None,
+    plan: Plan,
+) -> list[str]:
+    """Capture et rend les clips qui ne sont couverts par aucun fragment."""
+    from .browser import BrowserAnalyzer
+
+    rendered: list[str] = []
+    with BrowserAnalyzer(url, out_dir=out_dir / "browser", headless=True, channel="msedge") as browser:
+        browser.open()
+        for clip in clips:
+            start = max(0.0, clip.start - 1.5)
+            end = clip.end + 1.5
+            fragment = fragments / f"clip_{clip.index:02d}.webm"
+            print(f"→ capture du fragment manquant #{clip.index} ({start:.0f}→{end:.0f} s)", flush=True)
+            try:
+                browser.capture(start, end, fragment, audio_only=False)
+            except Exception as exc:  # noqa: BLE001
+                plan.warnings.append(f"Capture de l'extrait #{clip.index} impossible : {exc}")
+                continue
+            path = _render_from_fragment(
+                clip, fragment, clip.start - start, settings, style, fragments, out_dir, language, plan
+            )
+            if path:
+                rendered.append(path)
+    return rendered

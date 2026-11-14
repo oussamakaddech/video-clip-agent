@@ -86,6 +86,8 @@ class Settings:
     verbose: bool = False
     profile: str = "default"
     style: str = "default"
+    logo: str | None = None
+    logo_size: int = 120
     hook_enabled: bool = True
     hook_duration: float = 3.0
     max_chunks: int = 12
@@ -123,6 +125,8 @@ class Settings:
             "max_chunks": _env_int("CLIPAGENT_MAX_CHUNKS"),
             "chunk_chars": _env_int("CLIPAGENT_CHUNK_CHARS"),
             "style": os.getenv("CLIPAGENT_STYLE"),
+            "logo": os.getenv("CLIPAGENT_LOGO"),
+            "logo_size": _env_int("CLIPAGENT_LOGO_SIZE"),
             "hook_enabled": _env_bool("CLIPAGENT_HOOK"),
             "hook_duration": _env_float("CLIPAGENT_HOOK_DURATION"),
         }

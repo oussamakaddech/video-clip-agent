@@ -42,6 +42,8 @@ def settings_from_args(args: argparse.Namespace) -> Settings:
         "output_dir": Path(args.output) if getattr(args, "output", None) else None,
         "burn_subtitles": False if getattr(args, "no_subtitles", False) else None,
         "instruction": getattr(args, "instruction", None),
+        "logo": getattr(args, "logo", None),
+        "logo_size": getattr(args, "logo_size", None),
     }
     settings = Settings.from_env(**{k: v for k, v in overrides.items() if v is not None})
     # Langue RTL sans style explicite → style arabe (police et alignement adaptés).
@@ -410,6 +412,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         output_dir=args.output,
         padding=args.padding,
         language=args.language,
+        browser_url=getattr(args, "url", None),
     )
     save_report(plan, args.output)
     print(f"{len([c for c in plan.clips if c.path])} extrait(s) re-rendu(s) dans {args.output}")

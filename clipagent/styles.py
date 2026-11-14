@@ -99,8 +99,9 @@ class ClipStyle:
     facecam_position: str = "bottom-center"   # bottom-center | bottom-left | bottom-right
     facecam_shape: str = "circle"             # circle | square
     facecam_margin: int = 140
-    facecam_layout: str = "split"             # split (2/3 + 1/3) | blurred
+    facecam_layout: str = "split"             # split | cam-bottom | blurred
     facecam_top_ratio: float = 0.67           # part de l'écran réservée au contenu
+    facecam_region: float = 0.8               # élargissement de la zone caméra
 
     def is_rtl(self) -> bool:
         return self.subtitle.rtl or self.hook_style.rtl
@@ -133,8 +134,9 @@ STYLES: dict[str, ClipStyle] = {
         hook_max_chars=42,
         facecam_enabled=True,
         facecam_size=560,
-        facecam_layout="split",
-        facecam_top_ratio=0.67,
+        facecam_layout="cam-bottom",
+        facecam_top_ratio=0.56,
+        facecam_region=1.0,
         facecam_margin=40,
     ),
     "hype": _style(
@@ -178,8 +180,27 @@ STYLES: dict[str, ClipStyle] = {
             primary="#FFFFFF", back="#B3000000", outline_width=0, shadow=0,
         ),
     ),
-    "arabic": _style(
-        "arabic",
+    "streamer": _style(
+        "streamer",
+        "Streamer (caméra plein cadre)",
+        "Layout de référence : contenu sur 56 % du haut, caméra du streamer "
+        "en plein cadre sur 44 % du bas, sans cercle.",
+        zoom=1.0,
+        subtitle=SubtitleStyle(size=46, bold=True, outline_width=5, margin_v=90),
+        hook_enabled=True,
+        hook_duration=3.0,
+        hook_style=SubtitleStyle(
+            size=72, bold=True, border_style=3, alignment=8, margin_v=220,
+            primary="#FFFFFF", back="#CC000000", outline_width=0, shadow=0,
+        ),
+        hook_max_chars=44,
+        facecam_enabled=True,
+        facecam_size=560,
+        facecam_layout="cam-bottom",
+        facecam_top_ratio=0.56,
+        facecam_region=1.0,
+    ),
+    "arabic": _style(        "arabic",
         "عربي (RTL)",
         "Hook et sous-titres alignés pour l'arabe : police à couverture arabe, "
         "texte centré, interligne plus généreux.",

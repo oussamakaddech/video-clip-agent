@@ -226,29 +226,38 @@ clipagent render --plan output\clips_plan.json --video .\arabe.mp4 --transcript 
 * le rendu passe par **libass** : la mise en forme des lettres (shaping) et
   l'ordre droite-à-gauche sont corrects, ponctuation arabe comprise (`؟`).
 
-## 3d. Face cam — le visage du streamer en bas du clip
+## 3d. Face cam — format « streamer » (contenu + caméra)
 
-Sur les lives, le streamer apparaît souvent dans un coin de l'image. Pour un
-format vertical, ce visage est **redétecté** (OpenCV YuNet) puis **superposé
-en bas**, dans un cercle. L'écran est **divisé** :
+Format de référence : le contenu occupe le haut, la **caméra du streamer en
+plein cadre** occupe le bas. Le visage est **redétecté** (OpenCV YuNet) dans
+la source, la région caméra est isolée puis redimensionnée sur la bande basse.
 
 ```
 ┌──────────────────────┐
 │  accroche TikTok     │  ← 3 premières secondes
-│  contenu (16:9) net  │  ← 2/3 du haut
-│                      │
+│  contenu (16:9)      │  ← 56 % du haut (couvre la zone)
 │  sous-titres         │
 ├──────────────────────┤
-│  fond flouté         │
-│         ( ◕ )        │  ← 1/3 du bas : visage du streamer
+│  caméra du streamer  │  ← 44 % du bas, plein cadre
+│  (plein cadre)       │
 └──────────────────────┘
 ```
 
-* activé par le style `tiktok` (désactivé pour `default`, `clean`, `podcast`) ;
-* si aucun visage n'est trouvé, le clip est rendu normalement (avec un
-  avertissement dans le rapport) ;
-* position et taille réglables : `bottom-center` / `bottom-left` / `bottom-right`,
-  taille 320 px par défaut.
+* style `streamer` : exactement ce layout (56 / 44) ;
+* style `tiktok` : même layout + accroche plus affirmée ;
+* styles `podcast` / `clean` : pas de face cam ;
+* `--no-subtitles` : rend la vidéo **sans** sous-titres (comme la référence) ;
+* `--logo logo.png` : badge image posé en haut à gauche (comme la référence).
+
+### Détection fiable de la webcam
+
+Un stream contient souvent d'autres visages (illustrations d'un site, photos).
+Le projet retient la face **la plus persistante ET la plus mobile** : une vraie
+webcam bouge entre deux images, une illustration reste figée.
+
+```powershell
+clipagent finalize --plan output\clips_plan.json --fragments output\work --style streamer --no-subtitles
+```
 
 ## 4. Comment l'agent décide (le « niveau de clipping »)
 

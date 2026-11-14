@@ -72,6 +72,27 @@ class FaceBox:
             frame_width=frame_width, frame_height=frame_height,
         )
 
+    def camera_region(self, ratio: float = 1.2) -> "FaceBox":
+        """Région « caméra » élargie autour du visage (tête + épaules).
+
+        C'est la zone recadrée pour le layout « caméra plein cadre en bas » :
+        le visage seul est trop serré pour un rendu naturel.
+        """
+        width = int(self.width * (1 + 2 * ratio))
+        height = int(self.height * (1 + 2 * ratio))
+        cx = self.x + self.width / 2
+        cy = self.y + self.height / 2
+        region = FaceBox(
+            x=int(max(0, cx - width / 2)),
+            y=int(max(0, cy - height / 2)),
+            width=width,
+            height=height,
+            score=self.score,
+            frame_width=self.frame_width,
+            frame_height=self.frame_height,
+        )
+        return region.clamped(self.frame_width, self.frame_height)
+
     def to_dict(self) -> dict:
         return {"x": self.x, "y": self.y, "width": self.width, "height": self.height, "score": round(self.score, 3)}
 
@@ -87,34 +108,59 @@ def _detector():
     return cv2.FaceDetectorYN.create(str(MODEL_PATH), "", (320, 320), 0.6, 0.3, 5000)
 
 
+def detect_faces_in_image(path: str | Path) -> list[FaceBox]:
+    """Renvoie **tous** les visages détectés dans une image."""
+    import cv2
+
+    image = cv2.imread(str(path))
+    if image is None:
+        return []
+    height, width = image.shape[:2]
+    detector = _detector()
+    detector.setInputSize((width, height))
+    _ok, faces = detector.detect(image)
+    if faces is None or len(faces) == 0:
+        return []
+    boxes: list[FaceBox] = []
+    for face in faces:
+        box = FaceBox(
+            x=int(face[0]),
+            y=int(face[1]),
+            width=int(face[2]),
+            height=int(face[3]),
+            score=float(face[-1]),
+            frame_width=width,
+            frame_height=height,
+        )
+        boxes.append(box.clamped(width, height))
+    return boxes
+
+
 def detect_face_in_image(path: str | Path) -> FaceBox | None:
     """Cherche un visage dans une image (le plus grand trouvé).
 
     La boîte est bornée à l'image : une détection sur une image périmée ou
     d'une résolution différente ne peut pas casser le recadrage ffmpeg.
     """
-    import cv2
+    boxes = detect_faces_in_image(path)
+    if not boxes:
+        return None
+    return max(boxes, key=lambda b: b.width * b.height)
 
-    image = cv2.imread(str(path))
-    if image is None:
-        return None
-    height, width = image.shape[:2]
-    detector = _detector()
-    detector.setInputSize((width, height))
-    _ok, faces = detector.detect(image)
-    if faces is None or len(faces) == 0:
-        return None
-    best = max(faces, key=lambda f: float(f[2] * f[3]))
-    box = FaceBox(
-        x=int(best[0]),
-        y=int(best[1]),
-        width=int(best[2]),
-        height=int(best[3]),
-        score=float(best[-1]),
-        frame_width=width,
-        frame_height=height,
-    )
-    return box.clamped(width, height)
+
+def _region_motion(current, previous, box: FaceBox) -> float:
+    """Variation moyenne des pixels dans la boîte entre deux images."""
+    import numpy as np
+
+    if previous is None:
+        return 0.0
+    x, y = box.x, box.y
+    w, h = box.width, box.height
+    a = current[y : y + h, x : x + w]
+    b = previous[y : y + h, x : x + w]
+    if a.size == 0 or b.size == 0 or a.shape != b.shape:
+        return 0.0
+    return float(np.abs(a.astype("int16") - b.astype("int16")).mean() / 255.0)
 
 
 def detect_face_in_video(
@@ -125,11 +171,15 @@ def detect_face_in_video(
     duration: float | None = None,
     min_size: int = 14,
 ) -> FaceBox | None:
-    """Cherche un visage dans la vidéo en échantillonnant quelques images.
+    """Cherche le visage du streamer dans la vidéo.
 
-    On garde la boîte la plus fréquemment détectée (le visage du streamer reste
-    au même endroit pendant tout le stream).
+    Un stream contient souvent plusieurs visages : l'illustration d'un site,
+    une photo de profil, etc. On privilégie la **webcam du streamer**, donc la
+    face la plus **persistante** (présente dans le plus d'images) et la plus
+    **mobile** (une vraie caméra bouge, une illustration reste figée).
     """
+    import cv2
+
     video = Path(video)
     if not video.exists():
         return None
@@ -141,19 +191,27 @@ def detect_face_in_video(
         total = 30.0
 
     times = [start + (i + 0.5) * (total / max(1, samples)) for i in range(samples)]
-    boxes: list[FaceBox] = []
     tmp_dir = Path(video).parent / "_facecam_frames"
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    detections: dict[tuple, list[tuple[FaceBox, float]]] = {}
+    previous_image = None
+
     try:
         for index, moment in enumerate(times):
             frame_path = tmp_dir / f"probe_{index:02d}.jpg"
             frame_path.unlink(missing_ok=True)   # pas de frame périmée
-            ok = _extract_frame(video, moment, frame_path)
-            if not ok:
+            if not _extract_frame(video, moment, frame_path):
                 continue
-            box = detect_face_in_image(frame_path)
-            if box and box.width >= min_size and box.height >= min_size:
-                boxes.append(box)
+            image = cv2.imread(str(frame_path))
+            if image is None:
+                continue
+            for box in detect_faces_in_image(frame_path):
+                if box.width < min_size or box.height < min_size:
+                    continue
+                motion = _region_motion(image, previous_image, box)
+                key = (box.x // 24, box.y // 24, box.width // 24, box.height // 24)
+                detections.setdefault(key, []).append((box, motion))
+            previous_image = image
             frame_path.unlink(missing_ok=True)
     finally:
         try:
@@ -161,13 +219,17 @@ def detect_face_in_video(
         except OSError:
             pass
 
-    if not boxes:
+    if not detections:
         return None
 
-    # boîte médiane (plus stable qu'une moyenne)
-    boxes.sort(key=lambda b: b.x)
-    median_x = boxes[len(boxes) // 2]
-    return median_x
+    def group_score(entries) -> float:
+        presence = len(entries)
+        motion = sum(m for _box, m in entries) / presence
+        # présence × mobilité : la webcam du streamer gagne sur une illustration
+        return presence * (1.0 + motion * 6.0)
+
+    best_entries = max(detections.values(), key=group_score)
+    return best_entries[0][0]
 
 
 def _probe_duration(video: Path) -> float:

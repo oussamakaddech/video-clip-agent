@@ -63,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--output", default="output", help="Dossier de sortie")
         p.add_argument("--instruction", help="Consigne complémentaire pour l'agent")
         p.add_argument("--no-subtitles", action="store_true", help="Ne pas incruster les sous-titres")
+        p.add_argument("--logo", help="Image de logo (PNG/JPG) posée en haut à gauche")
+        p.add_argument("--logo-size", type=int, help="Largeur du logo en pixels (défaut: 120)")
 
     p_plan = sub.add_parser("plan", help="Sélectionner les extraits sans rendre")
     add_common(p_plan, needs_video=False)
@@ -143,6 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_final.add_argument("--style", choices=sorted(STYLES), help="Style visuel")
     p_final.add_argument("--language", help="Langue de la transcription (ex: en)")
     p_final.add_argument("--padding", type=float, default=1.5, help="Marge avant/après (s)")
+    p_final.add_argument(
+        "--url",
+        help="URL de la VOD : les clips non couverts par un fragment sont capturés à la demande",
+    )
 
     return parser
 

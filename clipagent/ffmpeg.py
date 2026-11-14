@@ -205,7 +205,22 @@ def build_facecam_filter_complex(
     face_chain += "[facec]"
 
     parts: list[str] = []
-    if layout == "split":
+    if layout == "cam-bottom":
+        # Layout « référence » : contenu sur le haut (couvre la zone),
+        # caméra du streamer PLEIN CADRE sur la bande du bas.
+        top_h = int(height * top_ratio)
+        band = height - top_h
+        parts.append(
+            f"[main]split=2[ct][cam];"
+            f"[ct]{normalize}scale={width}:{top_h}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{top_h}:(iw-ow)/2:(ih-oh)/2,setsar=1,"
+            f"pad={width}:{height}:0:0:color=black[ctop];"
+            f"[cam]{normalize}crop={w}:{h}:{x}:{y},"
+            f"scale={width}:{band}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{band}:(iw-ow)/2:(ih-oh)/2,setsar=1[camc]"
+        )
+        parts.append(f"[ctop][camc]overlay=0:{top_h}[ov]")
+    elif layout == "split":
         # Écran divisé : contenu net sur les 2/3 du haut (fond flouté pour
         # combler la letterbox), visage du streamer dans le 1/3 du bas.
         face_y = height - face_size - margin
@@ -262,6 +277,48 @@ def _overlay_position(position: str, margin: int) -> str:
     return f"(W-w)/2:H-h-{margin}"
 
 
+def find_font(name: str = "arialbd.ttf") -> str | None:
+    """Retrouve un fichier de police TrueType (pour le filtre drawtext)."""
+    candidates = [
+        Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / name,
+        Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "arial.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate).replace("\\", "/").replace(":", "\\:")
+    return None
+
+
+def build_overlay_chain(
+    video_label: str,
+    *,
+    width: int,
+    height: int,
+    logo: str | Path | None = None,
+    logo_size: int = 120,
+    logo_margin: int = 40,
+) -> tuple[str, list[str]]:
+    """Badge logo posé en haut à gauche (comme sur la vidéo de référence).
+
+    Renvoie l'étiquette de sortie et les entrées ffmpeg supplémentaires.
+    """
+    parts: list[str] = []
+    extra_inputs: list[str] = []
+    current = video_label
+
+    if logo:
+        logo_path = Path(logo)
+        if logo_path.exists():
+            extra_inputs.append(str(logo_path))
+            parts.append(f"[1:v]scale={logo_size}:-1[logo_s]")
+            parts.append(f"[{current}][logo_s]overlay={logo_margin}:{logo_margin}[ov_logo]")
+            current = "ov_logo"
+
+    return current, extra_inputs
+
+
 def build_cut_command(
     ffmpeg: str,
     video: str | Path,
@@ -285,6 +342,8 @@ def build_cut_command(
     face_margin: int = 140,
     face_layout: str = "split",
     face_top_ratio: float = 0.67,
+    logo: str | Path | None = None,
+    logo_size: int = 120,
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -295,9 +354,8 @@ def build_cut_command(
     command += ["-t", f"{max(0.1, end - start):.3f}"]
 
     if face_box is not None:
-        # Mode face cam : le contenu est réduit et posé en haut, le visage du
-        # streamer est superposé en bas.
-        command += ["-filter_complex", build_facecam_filter_complex(
+        # Face cam : contenu en haut, caméra du streamer en bas.
+        chain = build_facecam_filter_complex(
             width,
             height,
             face_box,
@@ -309,7 +367,20 @@ def build_cut_command(
             subs=subtitles,
             layout=face_layout,
             top_ratio=face_top_ratio,
-        )]
+        )
+        label, logo_inputs = build_overlay_chain(
+            "v", width=width, height=height, logo=logo, logo_size=logo_size
+        )
+        if logo_inputs:
+            chain += ";".join([
+                "[v][1:v]scale={}:-1[logo_s]".format(logo_size),
+                "[v][logo_s]overlay={}:{}[ov_logo]".format(40, 40),
+                "[ov_logo]null[v]",
+            ])
+            command += ["-filter_complex", chain]
+            command += ["-i", *logo_inputs]
+        else:
+            command += ["-filter_complex", chain]
         command += ["-map", "[v]", "-map", "0:a?"]
     else:
         filters = []
@@ -336,7 +407,17 @@ def build_cut_command(
                 )
                 filters.append(f"subtitles='{sub_path}':force_style='{style}'")
 
-        command += ["-vf", ",".join(filters)]
+        label, logo_inputs = build_overlay_chain(
+            "0:v", width=width, height=height, logo=logo, logo_size=logo_size
+        )
+        if logo_inputs:
+            filters.append(f"[{label}][1:v]scale={logo_size}:-1[logo_s]")
+            filters.append(f"[{label}][logo_s]overlay=40:40[v]")
+            command += ["-filter_complex", ";".join(filters)]
+            command += ["-i", *logo_inputs]
+            command += ["-map", "[v]", "-map", "0:a?"]
+        else:
+            command += ["-vf", ",".join(filters)]
 
     command += [
         "-c:v", "libx264",
@@ -449,6 +530,8 @@ def render_clip(
         face_margin=face_margin,
         face_layout=face_layout,
         face_top_ratio=face_top_ratio,
+        logo=settings.logo,
+        logo_size=settings.logo_size,
     )
     run(command)
     return output
