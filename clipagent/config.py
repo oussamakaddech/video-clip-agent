@@ -90,6 +90,32 @@ class Settings:
     logo_size: int = 120
     hook_enabled: bool = True
     hook_duration: float = 3.0
+
+    # --- Traitement IA -----------------------------------------------------
+    provider: str = ""            # openai | nvidia | ollama | (vide = auto)
+    provider_base_url: str | None = None
+
+    # --- Whisper -----------------------------------------------------------
+    whisper_model: str = "base"
+    whisper_beam_size: int = 5
+    whisper_vad: bool = True
+    whisper_word_timestamps: bool = False
+    whisper_language: str | None = None
+
+    # --- OpenCV / face cam -------------------------------------------------
+    facecam_detector: str = "yunet"     # yunet | haar
+    facecam_samples: int = 8
+    facecam_layout: str | None = None   # None = celui du style
+    facecam_region: float | None = None
+
+    # --- Encodage ffmpeg ---------------------------------------------------
+    encoder: str = "libx264"      # libx264 | libx265 | libvpx-vp9
+    crf: int = 18
+    preset: str = "slow"
+    fps: int = 30
+    audio_bitrate: str = "192k"
+    sharpen: float = 0.6
+    enhance: bool = True
     max_chunks: int = 12
     chunk_chars: int = 12_000
     download_dir: Path = Path("downloads")
@@ -127,6 +153,21 @@ class Settings:
             "style": os.getenv("CLIPAGENT_STYLE"),
             "logo": os.getenv("CLIPAGENT_LOGO"),
             "logo_size": _env_int("CLIPAGENT_LOGO_SIZE"),
+            "provider": os.getenv("CLIPAGENT_PROVIDER"),
+            "provider_base_url": os.getenv("CLIPAGENT_PROVIDER_BASE_URL"),
+            "whisper_model": os.getenv("CLIPAGENT_WHISPER_MODEL"),
+            "whisper_beam_size": _env_int("CLIPAGENT_WHISPER_BEAM"),
+            "whisper_vad": _env_bool("CLIPAGENT_WHISPER_VAD"),
+            "whisper_word_timestamps": _env_bool("CLIPAGENT_WHISPER_WORDS"),
+            "facecam_detector": os.getenv("CLIPAGENT_FACECAM_DETECTOR"),
+            "facecam_samples": _env_int("CLIPAGENT_FACECAM_SAMPLES"),
+            "encoder": os.getenv("CLIPAGENT_ENCODER"),
+            "crf": _env_int("CLIPAGENT_CRF"),
+            "preset": os.getenv("CLIPAGENT_PRESET"),
+            "fps": _env_int("CLIPAGENT_FPS"),
+            "audio_bitrate": os.getenv("CLIPAGENT_AUDIO_BITRATE"),
+            "sharpen": _env_float("CLIPAGENT_SHARPEN"),
+            "enhance": _env_bool("CLIPAGENT_ENHANCE"),
             "hook_enabled": _env_bool("CLIPAGENT_HOOK"),
             "hook_duration": _env_float("CLIPAGENT_HOOK_DURATION"),
         }

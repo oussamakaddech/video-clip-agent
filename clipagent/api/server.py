@@ -28,14 +28,21 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 from ..config import Settings
+from ..pipeline import save_report
 from ..service import (
     ClipRequest,
+    PROVIDERS,
     available_profiles,
+    available_providers,
     available_styles,
+    compare_styles as render_style_comparison,
     disk_usage,
     free_space,
+    list_models,
+    update_clip,
     validate_request,
 )
+from ..styles import STYLES
 from .jobs import Job, JobManager
 from .schemas import ClipJobRequest, HealthResponse, JobSummary
 
@@ -60,6 +67,14 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
 
     manager = JobManager(output_root)
     app.state.jobs = manager
+
+    @app.middleware("http")
+    async def _no_cache_static(request, call_next):
+        """Les fichiers statiques ne doivent jamais être servis en cache."""
+        response = await call_next(request)
+        if request.url.path.startswith("/static"):
+            response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
 
     # --- API --------------------------------------------------------------
     @app.get("/api/health", response_model=HealthResponse)
@@ -187,6 +202,129 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
         if job.status not in {"running", "queued"}:
             manager.delete(job_id)
         return {"ok": True}
+
+    @app.get("/api/models")
+    def models(provider: str | None = None) -> dict:
+        """Modèles disponibles sur le fournisseur configuré (compatible OpenAI)."""
+        settings = Settings.from_env()
+        if provider:
+            settings.provider = provider
+            settings.provider_base_url = None
+            settings.base_url = PROVIDERS.get(provider, {}).get("base_url")
+        listing = list_models(settings)
+        return {"models": listing, "providers": available_providers(), "current": settings.model}
+
+    @app.get("/api/options")
+    def options() -> dict:
+        """Catalogue des réglages avancés (IA, Whisper, OpenCV, ffmpeg, encodage)."""
+        settings = Settings.from_env()
+        ffmpeg_path = None
+        ffmpeg_version = None
+        try:
+            from ..ffmpeg import resolve_ffmpeg
+
+            ffmpeg_path = resolve_ffmpeg(settings.ffmpeg_binary)
+            import subprocess
+
+            out = subprocess.run([ffmpeg_path, "-version"], capture_output=True, text=True).stdout
+            ffmpeg_version = out.splitlines()[0] if out else None
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "providers": available_providers(),
+            "whisper": {
+                "models": ["tiny", "base", "small", "medium", "large-v3", "distil-large-v3"],
+                "beam_size": settings.whisper_beam_size,
+                "vad": settings.whisper_vad,
+                "word_timestamps": settings.whisper_word_timestamps,
+            },
+            "opencv": {
+                "detectors": ["yunet", "haar"],
+                "samples": settings.facecam_samples,
+            },
+            "ffmpeg": {
+                "path": ffmpeg_path,
+                "version": ffmpeg_version,
+                "custom_path": settings.ffmpeg_binary,
+            },
+            "encoder": {
+                "codecs": ["libx264", "libx265", "libvpx-vp9"],
+                "current": settings.encoder,
+                "crf": settings.crf,
+                "preset": settings.preset,
+                "fps": settings.fps,
+                "sharpen": settings.sharpen,
+                "enhance": settings.enhance,
+            },
+        }
+
+    @app.post("/api/jobs/{job_id}/compare")
+    def compare_styles(job_id: str, payload: dict) -> dict:
+        """Rend un même extrait dans plusieurs styles (comparateur)."""
+        job = _job_or_404(manager, job_id)
+        styles = [s for s in (payload.get("styles") or []) if s in STYLES] or ["streamer", "tiktok", "hype"]
+        clip_index = int(payload.get("clip_index", 1))
+        if not job.output_dir:
+            raise HTTPException(status_code=409, detail="Tâche sans dossier de sortie")
+        fragments = Path(job.output_dir) / "work"
+        if not fragments.exists() and not job.request.video_path:
+            raise HTTPException(status_code=409, detail="Aucun fragment capturé : relancez l'analyse")
+        try:
+            results = render_style_comparison(
+                job.plan,  # type: ignore[attr-defined]
+                clip_index,
+                styles,
+                settings=Settings.from_env(),
+                fragments_dir=fragments,
+                output_dir=job.output_dir,
+                language=payload.get("language"),
+                whisper_model=payload.get("whisper_model", "small"),
+                video_path=job.request.video_path,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"results": results}
+
+    @app.patch("/api/jobs/{job_id}/clips/{index}")
+    def edit_clip(job_id: str, index: int, payload: dict) -> dict:
+        """Édite le titre / l'accroche d'un extrait (avant rendu)."""
+        job = _job_or_404(manager, job_id)
+        clip = update_clip(
+            job.plan,  # type: ignore[attr-defined]
+            index,
+            title=payload.get("title"),
+            hook=payload.get("hook"),
+        )
+        if clip is None:
+            raise HTTPException(status_code=404, detail="Extrait introuvable")
+        if job.output_dir:
+            save_report(job.plan, job.output_dir)
+        return {"clip": clip.to_dict()}
+
+    @app.get("/api/jobs/{job_id}/compare-file")
+    def compare_file(job_id: str, path: str) -> FileResponse:
+        """Sert un rendu de comparaison (généré à la demande)."""
+        job = _job_or_404(manager, job_id)
+        if not job.output_dir:
+            raise HTTPException(status_code=404, detail="Tâche sans dossier")
+        target = (Path(job.output_dir) / path).resolve()
+        root = Path(job.output_dir).resolve()
+        if not str(target).startswith(str(root)) or not target.exists():
+            raise HTTPException(status_code=404, detail="Fichier indisponible")
+        return FileResponse(target, media_type="video/mp4", filename=target.name)
+
+    @app.patch("/api/jobs/{job_id}/style")
+    def set_style(job_id: str, payload: dict) -> dict:
+        """Retient le style choisi dans le comparateur."""
+        job = _job_or_404(manager, job_id)
+        style = str(payload.get("style", ""))
+        if style not in STYLES:
+            raise HTTPException(status_code=422, detail="Style inconnu")
+        job.request.style = style
+        job.plan.style = style  # type: ignore[attr-defined]
+        if job.output_dir:
+            save_report(job.plan, job.output_dir)  # type: ignore[arg-type]
+        return {"style": style}
 
     @app.get("/api/jobs/{job_id}/events")
     async def job_events(job_id: str) -> StreamingResponse:

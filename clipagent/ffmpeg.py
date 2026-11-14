@@ -379,6 +379,9 @@ def build_cut_command(
     sharpen: float = 0.6,
     enhance: bool = True,
     crf: int = 18,
+    encoder: str = "libx264",
+    preset: str = "slow",
+    audio_bitrate: str = "192k",
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -468,16 +471,22 @@ def build_cut_command(
         else:
             command += ["-vf", ",".join(filters)]
 
-    command += [
-        "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", str(crf),
+    # Encodage : le codec est au choix (H.264 universel, H.265 plus compact,
+    # VP9 pour YouTube). CRF = qualité (plus bas = mieux), preset = vitesse.
+    if encoder == "libx265":
+        video_args = ["-c:v", "libx265", "-preset", preset, "-crf", str(crf), "-tag:v", "hvc1"]
+    elif encoder == "libvpx-vp9":
+        video_args = ["-c:v", "libvpx-vp9", "-crf", str(crf), "-b:v", "0", "-row-mt", "1"]
+    else:
+        video_args = ["-c:v", "libx264", "-preset", preset, "-crf", str(crf)]
+
+    command += video_args + [
         "-profile:v", "high",
         "-level", "4.1",
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
         "-c:a", "aac",
-        "-b:a", "192k",
+        "-b:a", audio_bitrate,
         "-ar", "48000",
         "-movflags", "+faststart",
         str(output),
@@ -540,6 +549,9 @@ def render_clip(
     fast: bool = False,
     style=None,
     face_box: object | None = None,
+    encoder: str = "libx264",
+    preset: str = "slow",
+    audio_bitrate: str = "192k",
 ) -> Path:
     """Rend un extrait et renvoie le chemin du fichier produit."""
     ffmpeg = resolve_ffmpeg(settings.ffmpeg_binary)
@@ -586,6 +598,13 @@ def render_clip(
         face_top_ratio=face_top_ratio,
         logo=settings.logo,
         logo_size=settings.logo_size,
+        encoder=encoder,
+        preset=preset,
+        audio_bitrate=audio_bitrate,
+        crf=getattr(settings, "crf", 18),
+        fps=getattr(settings, "fps", 30),
+        sharpen=getattr(settings, "sharpen", 0.6),
+        enhance=getattr(settings, "enhance", True),
     )
     run(command)
     return output

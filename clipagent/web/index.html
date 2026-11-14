@@ -121,6 +121,91 @@
           <div class="step-title">Lancement</div>
           <button class="primary" id="btn-start">▶ Lancer le clipping</button>
           <p class="hint" id="start-hint"></p>
+
+          <details class="advanced" id="advanced">
+            <summary>Réglages avancés (IA · Whisper · OpenCV · ffmpeg)</summary>
+            <div class="advanced-body">
+              <div class="grid2">
+                <label class="field">
+                  <span>Fournisseur d'IA</span>
+                  <select id="opt-provider"></select>
+                </label>
+                <label class="field">
+                  <span>Modèle</span>
+                  <select id="opt-model"></select>
+                </label>
+              </div>
+
+              <div class="grid2">
+                <label class="field">
+                  <span>Modèle Whisper</span>
+                  <select id="opt-whisper"></select>
+                </label>
+                <label class="field">
+                  <span>Précision Whisper (beam)</span>
+                  <select id="opt-beam">
+                    <option value="1">1 · rapide</option>
+                    <option value="5" selected>5 · équilibré</option>
+                    <option value="8">8 · précis</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="grid3">
+                <label class="field">
+                  <span>Détecteur OpenCV</span>
+                  <select id="opt-detector">
+                    <option value="yunet">YuNet (précis)</option>
+                    <option value="haar">Haar (léger)</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Échantillons face cam</span>
+                  <input type="number" id="opt-samples" min="2" max="24" value="8" />
+                </label>
+                <label class="field">
+                  <span>Codec</span>
+                  <select id="opt-encoder">
+                    <option value="libx264">H.264 (universal)</option>
+                    <option value="libx265">H.265 (plus léger)</option>
+                    <option value="libvpx-vp9">VP9 (YouTube)</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="grid3">
+                <label class="field">
+                  <span>CRF (qualité)</span>
+                  <input type="number" id="opt-crf" min="10" max="32" value="18" />
+                </label>
+                <label class="field">
+                  <span>Preset ffmpeg</span>
+                  <select id="opt-preset">
+                    <option value="veryslow">veryslow</option>
+                    <option value="slow" selected>slow</option>
+                    <option value="medium">medium</option>
+                    <option value="fast">fast</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Netteté</span>
+                  <input type="number" id="opt-sharpen" min="0" max="2" step="0.1" value="0.6" />
+                </label>
+              </div>
+
+              <label class="field">
+                <span>Chemin de ffmpeg (optionnel)</span>
+                <input type="text" id="opt-ffmpeg" placeholder="C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe" />
+                <small id="ffmpeg-info">—</small>
+              </label>
+
+              <div class="row">
+                <label class="check"><input type="checkbox" id="opt-vad" checked /> Coupe des silences (VAD)</label>
+                <label class="check"><input type="checkbox" id="opt-words" /> Timestamps par mot</label>
+                <label class="check"><input type="checkbox" id="opt-enhance" checked /> Ajustement couleur</label>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
     </section>
@@ -159,11 +244,15 @@
         <div class="card-head">
           <h2>Extraits produits</h2>
           <div style="display: flex; gap: 8px;">
+            <button class="ghost" id="btn-compare">Comparer les styles</button>
             <button class="ghost" id="btn-copy-report" hidden>Copier le rapport</button>
             <button class="ghost" id="btn-download-all" hidden>Tout télécharger</button>
           </div>
         </div>
         <div class="card-body">
+          <p class="edit-hint" id="edit-hint" hidden>
+            ✎ Cliquez sur un titre ou un accroche pour le modifier, puis validez.
+          </p>
           <div class="results" id="results">
             <div class="empty">Les extraits apparaîtront ici, avec aperçu vidéo et téléchargement direct.</div>
           </div>
@@ -189,6 +278,19 @@
   </footer>
 
   <div class="toasts" id="toasts"></div>
+
+  <!-- Comparateur de styles -->
+  <div class="modal" id="compare-modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Comparateur de styles</h3>
+        <button class="icon-btn" data-close aria-label="Fermer">✕</button>
+      </div>
+      <p class="modal-sub" id="compare-sub">Rendu du même extrait dans plusieurs styles, à partir des fragments déjà capturés.</p>
+      <div class="compare-grid" id="compare-grid"></div>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

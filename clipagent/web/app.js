@@ -175,6 +175,7 @@
       subtitles: $("input-subs").checked,
       facecam: $("input-facecam").checked ? true : null,
       render: $("input-render").checked,
+      ...advancedPayload(),
     };
 
     try {
@@ -315,9 +316,15 @@
           <span class="dur">${Math.round(clip.duration)} s</span>
         </div>
         <div class="meta">
-          <div class="title">${escapeHtml(clip.title || "Extrait")}</div>
+          <div class="title" contenteditable="true" data-field="title" data-index="${clip.index}"
+               title="Cliquer pour modifier">${escapeHtml(clip.title || "Extrait")}</div>
           <div class="sub">${formatTime(clip.start)} → ${formatTime(clip.end)} · score ${(clip.score ?? 0).toFixed(2)}</div>
-          ${clip.hook ? `<div class="hook">🪝 ${escapeHtml(clip.hook)}</div>` : ""}
+          <div class="hook" contenteditable="true" data-field="hook" data-index="${clip.index}"
+               title="Cliquer pour modifier l'accroche">🪝 ${escapeHtml(clip.hook || "Accroche à personnaliser…")}</div>
+          <div class="edit-row">
+            <button data-save="${clip.index}">💾 Enregistrer</button>
+            <button data-compare="${clip.index}">🎨 Comparer</button>
+          </div>
           <div class="actions">
             <a href="/api/jobs/${jobId}/report" target="_blank" rel="noopener">Rapport</a>
             ${hasFile ? `<a href="${source}" download>Télécharger</a>` : ""}
@@ -325,6 +332,38 @@
         </div>`;
       box.appendChild(card);
     });
+
+    // Édition inline : sauvegarde vers l'API
+    box.querySelectorAll("[data-save]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const index = Number(button.dataset.save);
+        const card = button.closest(".clip");
+        const title = card.querySelector('[data-field="title"]').innerText.trim();
+        const hook = card.querySelector('[data-field="hook"]').innerText.replace(/^🪝\s*/, "").trim();
+        try {
+          const res = await fetch(`/api/jobs/${jobId}/clips/${index}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, hook }),
+          });
+          if (!res.ok) throw new Error(`Erreur ${res.status}`);
+          card.querySelectorAll('[contenteditable="true"]').forEach((el) => {
+            el.classList.remove("dirty");
+            el.classList.add("saved");
+            setTimeout(() => el.classList.remove("saved"), 900);
+          });
+          toast("Extrait mis à jour", `Titre et accroche de l'extrait #${index}`, "ok");
+        } catch (err) {
+          toast("Enregistrement impossible", String(err.message || err), "error");
+        }
+      });
+    });
+
+    box.querySelectorAll("[data-compare]").forEach((button) => {
+      button.addEventListener("click", () => openCompare(Number(button.dataset.compare)));
+    });
+
+    $("edit-hint").hidden = false;
 
     const best = document.createElement("div");
     best.className = "best";
@@ -364,6 +403,79 @@
     } catch (err) {
       toast("Copie impossible", String(err.message || err), "error");
     }
+  });
+
+  /* ================= Comparateur de styles ================= */
+  const COMPARE_STYLES = ["streamer", "tiktok", "hype", "reels"];
+
+  async function openCompare(clipIndex) {
+    if (!state.jobId) { toast("Aucune tâche", "Lancez d'abord un clipping.", "error"); return; }
+    const modal = $("compare-modal");
+    const grid = $("compare-grid");
+    modal.hidden = false;
+    grid.innerHTML = COMPARE_STYLES.map(() => '<div class="skeleton sk-card"></div>').join("");
+    $("compare-sub").textContent = `Rendu de l'extrait #${clipIndex} dans plusieurs styles…`;
+
+    try {
+      const res = await fetch(`/api/jobs/${state.jobId}/compare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clip_index: clipIndex,
+          styles: COMPARE_STYLES,
+          language: $("input-language").value || null,
+          whisper_model: $("opt-whisper").value || "small",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `Erreur ${res.status}`);
+
+      grid.innerHTML = "";
+      data.results.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "compare-item";
+        const file = item.path ? `/api/jobs/${state.jobId}/compare-file?path=${encodeURIComponent(item.path)}` : "";
+        card.innerHTML = `
+          ${item.path ? `<video controls preload="metadata" playsinline src="${file}"></video>` : ""}
+          <div class="meta">
+            <div class="name">${escapeHtml(item.label)}</div>
+            <div class="desc">${escapeHtml(item.description)}</div>
+          </div>
+          <button data-pick="${escapeHtml(item.style)}">Retenir ce style</button>`;
+        card.querySelector("button").addEventListener("click", async () => {
+          try {
+            const patch = await fetch(`/api/jobs/${state.jobId}/style`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ style: item.style }),
+            });
+            if (!patch.ok) throw new Error(`Erreur ${patch.status}`);
+            $("input-style").value = item.style;
+            toast("Style retenu", `${item.label} — relancez le rendu pour l'appliquer.`, "ok");
+            closeCompare();
+          } catch (err) {
+            toast("Application impossible", String(err.message || err), "error");
+          }
+        });
+        grid.appendChild(card);
+      });
+      $("compare-sub").textContent = `Extrait #${clipIndex} — comparé côte à côte.`;
+    } catch (err) {
+      grid.innerHTML = `<div class="empty">${escapeHtml(String(err.message || err))}</div>`;
+    }
+  }
+
+  function closeCompare() { $("compare-modal").hidden = true; }
+
+  $("btn-compare").addEventListener("click", () => {
+    const first = document.querySelector("#results .clip [data-compare]");
+    openCompare(first ? Number(first.dataset.compare) : 1);
+  });
+  document.querySelectorAll("#compare-modal [data-close]").forEach((element) => {
+    element.addEventListener("click", closeCompare);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCompare();
   });
 
   /* ================= Historique ================= */
@@ -411,9 +523,98 @@
 
   $("btn-refresh-history").addEventListener("click", loadHistory);
 
+  /* ================= Réglages avancés ================= */
+  async function loadOptions() {
+    try {
+      const data = await (await fetch("/api/options")).json();
+
+      // Fournisseurs + modèles IA
+      const providerSelect = $("opt-provider");
+      providerSelect.innerHTML = "";
+      data.providers.forEach((provider) => {
+        const option = document.createElement("option");
+        option.value = provider.name;
+        option.textContent = provider.label;
+        providerSelect.appendChild(option);
+      });
+      providerSelect.value = "nvidia";
+      await loadModels("nvidia");
+      providerSelect.addEventListener("change", () => loadModels(providerSelect.value));
+
+      // Whisper
+      const whisperSelect = $("opt-whisper");
+      whisperSelect.innerHTML = "";
+      (data.whisper.models || []).forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        whisperSelect.appendChild(option);
+      });
+      whisperSelect.value = data.whisper.models.includes("base") ? "base" : whisperSelect.value;
+      $("opt-beam").value = String(data.whisper.beam_size ?? 5);
+      $("opt-vad").checked = Boolean(data.whisper.vad);
+      $("opt-words").checked = Boolean(data.whisper.word_timestamps);
+
+      // OpenCV
+      $("opt-detector").value = data.opencv.detectors.includes("yunet") ? "yunet" : "haar";
+      $("opt-samples").value = String(data.opencv.samples ?? 8);
+
+      // ffmpeg / encodage
+      $("opt-ffmpeg").value = data.ffmpeg.custom_path || "";
+      $("ffmpeg-info").textContent = data.ffmpeg.version || "ffmpeg non détecté";
+      $("opt-encoder").value = data.encoder.current || "libx264";
+      $("opt-crf").value = String(data.encoder.crf ?? 18);
+      $("opt-preset").value = data.encoder.preset || "slow";
+      $("opt-sharpen").value = String(data.encoder.sharpen ?? 0.6);
+      $("opt-enhance").checked = Boolean(data.encoder.enhance);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadModels(provider) {
+    const select = $("opt-model");
+    select.innerHTML = '<option value="">Chargement…</option>';
+    try {
+      const data = await (await fetch(`/api/models?provider=${encodeURIComponent(provider)}`)).json();
+      select.innerHTML = "";
+      (data.models || []).forEach((model) => {
+        const option = document.createElement("option");
+        option.value = model.id;
+        option.textContent = model.id;
+        select.appendChild(option);
+      });
+      if (!select.options.length) {
+        select.innerHTML = '<option value="">aucun modèle listé</option>';
+      }
+    } catch (err) {
+      select.innerHTML = '<option value="">catalogue indisponible</option>';
+    }
+  }
+
+  function advancedPayload() {
+    return {
+      provider: $("opt-provider").value,
+      model: $("opt-model").value,
+      whisper_model: $("opt-whisper").value,
+      whisper_beam: Number($("opt-beam").value),
+      whisper_vad: $("opt-vad").checked,
+      whisper_words: $("opt-words").checked,
+      detector: $("opt-detector").value,
+      facecam_samples: Number($("opt-samples").value),
+      encoder: $("opt-encoder").value,
+      crf: Number($("opt-crf").value),
+      preset: $("opt-preset").value,
+      sharpen: Number($("opt-sharpen").value),
+      enhance: $("opt-enhance").checked,
+      ffmpeg: $("opt-ffmpeg").value.trim(),
+    };
+  }
+
   /* ================= Démarrage ================= */
   loadHealth();
   loadStyles();
+  loadOptions();
   loadHistory();
   setInterval(loadHealth, 30000);
 

@@ -52,10 +52,24 @@ def transcribe_media(
     model_name: str = "tiny",
     language: str | None = None,
     offset: float = 0.0,
+    beam_size: int = 5,
+    vad: bool = True,
+    word_timestamps: bool = False,
 ) -> list[Segment]:
-    """Transcrit un média local (Whisper) et renvoie des segments décalés."""
+    """Transcrit un média local (Whisper) et renvoie des segments décalés.
+
+    ``beam_size`` : taille de la recherche (plus haut = plus précis, plus lent).
+    ``vad`` : coupe les silences (rapide) ; ``word_timestamps`` : alignement
+    au mot (utile pour des sous-titres mot à mot).
+    """
     model = _whisper_model(model_name)
-    segments, _info = model.transcribe(str(path), language=language, vad_filter=True)
+    segments, _info = model.transcribe(
+        str(path),
+        language=language,
+        vad_filter=vad,
+        beam_size=beam_size,
+        word_timestamps=word_timestamps,
+    )
     return [
         Segment(index=i, start=s.start + offset, end=s.end + offset, text=s.text.strip())
         for i, s in enumerate(segments, start=1)

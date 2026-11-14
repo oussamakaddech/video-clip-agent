@@ -215,6 +215,44 @@ Options principales :
 | `podcast` | 6 | 30–120 s | extraits plus longs |
 | `livestream` | 12 | 25–90 s | VOD de live (beaucoup de pics) |
 
+## 2c. Comparateur de styles, édition et réglages avancés
+
+### Comparateur de styles
+
+Un bouton **« Comparer les styles »** rend **le même extrait dans 4 styles**
+(streamer, tiktok, hype, reels) et les affiche **côte à côte** dans une modale,
+avec un bouton « Retenir ce style » qui applique le gagnant à la tâche.
+
+Les rendus réutilisent les fragments déjà capturés (ou la vidéo locale) : **aucun
+flux n'est retéléchargé**, la comparaison prend ~30 s.
+
+```bash
+POST /api/jobs/{id}/compare   {"clip_index": 1, "styles": ["streamer","tiktok","hype"]}
+```
+
+### Édition des titres et accroches
+
+Les titres et accroches sont **modifiables directement dans la grille**
+(`contenteditable`) ; « 💾 Enregistrer » persiste via l'API et réécrit le
+rapport :
+
+```bash
+PATCH /api/jobs/{id}/clips/{index}   {"title": "...", "hook": "..."}
+```
+
+### Réglages avancés (panneau dépliable)
+
+| Famille | Choix |
+|---|---|
+| **IA** | 5 fournisseurs (OpenAI, NVIDIA NIM, Ollama, Together, Groq) + **catalogue des modèles du endpoint** (`GET /api/models`) filtré sur ceux qui savent utiliser des outils ; choix du modèle précis |
+| **Whisper** | 6 modèles (`tiny` → `large-v3`, `distil-large-v3`), précision (beam 1/5/8), coupe des silences (VAD), timestamps par mot |
+| **OpenCV** | détecteur `yunet` ou `haar`, nombre d'échantillons pour la détection de la webcam |
+| **ffmpeg** | chemin de l'exécutable (version affichée), **codec** (H.264 / H.265 / VP9), CRF, preset, FPS, netteté, ajustement couleur, bitrate audio |
+
+```bash
+GET /api/options   # catalogue complet des réglages + versions détectées
+```
+
 ## 3. Sorties (`output/`)
 
 | Fichier | Contenu |
