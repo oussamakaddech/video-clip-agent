@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .browser import BrowserAnalyzer, BrowserError, FrameSample
+from .chat import build_chat_context, extract_chat
 from .config import Settings
 from .ffmpeg import FFmpegError, concat_clips, render_clip
 from .hooks import resolve_hook
@@ -31,40 +32,8 @@ from .styles import ClipStyle, get_style
 from .transcript import Transcript
 
 
-# --- Détection de pics (logique pure, testable) ----------------------------
-def detect_peaks(
-    samples: list[FrameSample],
-    *,
-    count: int = 8,
-    min_gap: float = 180.0,
-) -> list[FrameSample]:
-    """Retient les `count` échantillons les plus « mouvementés », bien espacés.
-
-    Le score combine le mouvement brut et un bonus de pic local : un échantillon
-    très actif surrounded d'échantillons calmes marque un moment fort.
-    """
-    if not samples:
-        return []
-    motions = [s.motion for s in samples]
-    peak_bonus: dict[float, float] = {}
-    for index, sample in enumerate(samples):
-        before = motions[index - 1] if index > 0 else 0.0
-        after = motions[index + 1] if index + 1 < len(motions) else 0.0
-        neighbours = (before + after) / 2
-        peak_bonus[sample.timestamp] = max(0.0, sample.motion - neighbours)
-
-    scored = sorted(
-        samples,
-        key=lambda s: -(s.motion + 0.6 * peak_bonus[s.timestamp]),
-    )
-
-    chosen: list[FrameSample] = []
-    for sample in scored:
-        if all(abs(sample.timestamp - other.timestamp) >= min_gap for other in chosen):
-            chosen.append(sample)
-        if len(chosen) >= count:
-            break
-    return sorted(chosen, key=lambda s: s.timestamp)
+# --- Détection de pics (délégué à clipagent.scoring) -----------------------
+from .scoring import Candidate, detect_peaks, score_candidates  # noqa: E402,F401  (ré-export)
 
 
 # --- Transcription locale ---------------------------------------------------
@@ -115,6 +84,7 @@ class BrowserOptions:
     headless: bool = True
     style: str | None = None
     padding: float = 1.5
+    use_chat: bool = True
 
 
 def analyze_in_browser(
@@ -141,16 +111,36 @@ def analyze_in_browser(
 
         print(f"→ storyboard (1 image / {opts.step:.0f} s)", flush=True)
         samples = browser.storyboard(step=opts.step)
-        peaks = detect_peaks(samples, count=opts.candidates, min_gap=max(120.0, opts.window * 4))
-        print(f"  {len(peaks)} fenêtres candidates : "
-              + ", ".join(f"{p.timestamp:.0f}s" for p in peaks), flush=True)
 
-        # --- Étape 3 : audio des fenêtres candidates -----------------------
+        # Le chat replay est lu dans la page : signal sémantique gratuit pour
+        # classer les fenêtres candidates (une vague de messages = moment fort).
+        chat_messages: list = []
+        if opts.use_chat:
+            try:
+                chat_messages = extract_chat(browser.page)
+                print(f"  chat replay : {len(chat_messages)} message(s) lu(s)", flush=True)
+            except Exception as exc:  # noqa: BLE001 - le chat est optionnel
+                plan.warnings.append(f"Chat replay illisible ({exc.__class__.__name__}) : ignoré.")
+
+        candidates = score_candidates(
+            samples,
+            chat_messages,
+            count=opts.candidates,
+            window=opts.window,
+            min_gap=max(90.0, opts.window * 1.2),
+        )
+        print(
+            f"  {len(candidates)} fenêtres candidates : "
+            + ", ".join(f"{c.start:.0f}s(score {c.score:.2f})" for c in candidates),
+            flush=True,
+        )
+
+        # --- Étape 3 : capture des fenêtres candidates ----------------------
         segments: list[Segment] = []
         candidate_spans: list[tuple[float, float]] = []
-        for index, peak in enumerate(peaks, start=1):
-            start = max(0.0, peak.timestamp - opts.window / 2)
-            end = min(duration, peak.timestamp + opts.window / 2)
+        for index, candidate in enumerate(candidates, start=1):
+            start = max(0.0, candidate.start)
+            end = min(duration, candidate.end)
             if end - start < 5:
                 continue
             audio_path = work_dir / f"cand_{index:02d}.webm"
@@ -203,6 +193,17 @@ def analyze_in_browser(
             return plan
 
         # --- Étape 4 : sélection par l'agent -------------------------------
+        # Le chat replay donne à l'IA le contexte sémantique de chaque fenêtre
+        # (ce que le public a réagi) : les titres et hooks en profitent.
+        chat_context = build_chat_context(chat_messages, candidate_spans) if chat_messages else ""
+        instruction = instruction or ""
+        if chat_context:
+            instruction = (
+                f"{instruction}\n\n{chat_context}\n\n"
+                "Tiens compte de l'activité du chat : une fenêtre très commentée "
+                "est généralement un moment fort."
+            ).strip()
+
         proposals = []
         try:
             from .llm import run_agent_chunked
@@ -211,6 +212,7 @@ def analyze_in_browser(
                 transcript,
                 settings,
                 duration=duration,
+                extra_instruction=instruction,
                 max_chunks=settings.max_chunks,
             )
             plan.chunks = chunks

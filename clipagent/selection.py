@@ -11,18 +11,37 @@ from dataclasses import dataclass
 
 from .models import Clip, ClipProposal, Segment
 
-# Mots-clés qui signalent un moment fort dans un flux de parole.
+# Mots-clés qui signalent un moment fort dans un flux de parole
+# (français, anglais et arabe).
 HOOK_PATTERNS = [
+    # français
     r"\b(?:la clé|le point clé|ce qu'il faut retenir|à retenir|le secret|la méthode)\b",
     r"\b(?:tout le monde|jamais|personne|personne ne|incroyable|exceptionnellement)\b",
     r"\b(?:premier(?:e)? fois|record|dépass|jamais atteint)\b",
     r"\b(?:je vais montrer|on va voir|regardez|attention|surveillez)\b",
     r"\b(?:résumé|en résumé|conclusion|bilan|ce qu'on retient)\b",
     r"\b(?:question|réponse|problème|solution|erreur|attention)\b",
+    # anglais
+    r"\b(?:the key|here'?s the thing|here'?s why|the secret|the trick|the method)\b",
+    r"\b(?:nobody|no one|never|always|everyone|crazy|insane|unbelievable)\b",
+    r"\b(?:first time|record|we doubled|it changed everything|the whole point)\b",
+    r"\b(?:watch this|listen|look at|here'?s how|the reason why)\b",
+    r"\b(?:summary|in summary|conclusion|the takeaway|the point is)\b",
+    r"\b(?:question|answer|problem|solution|mistake|actually)\b",
+    # arabe
+    r"(?:المفتاح|السر|الطريقة|الأهم|في الواقع|توقف|انظر|استمع)",
+    r"(?:لماذا|كيف|ما هو|أول مرة|أفضل)",
 ]
 _HOOK_RE = re.compile("|".join(HOOK_PATTERNS), re.IGNORECASE)
-_SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
-_WORD_RE = re.compile(r"[\wÀ-ÿ']+")
+_SENTENCE_RE = re.compile(r"(?<=[.!?…؟।])\s+")
+_WORD_RE = re.compile(r"[\wÀ-ÿ'؀-ۿऀ-ॿ]+")
+
+# Nombres écrits ou en chiffres (accroches chiffrées).
+_NUMBER_RE = re.compile(
+    r"\b(?:\d[\d.,]*\s*(?:%|x|k|m|milliards?|millions?)?|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"hundred|thousand|million|billion|double|triple|twice)\b",
+    re.IGNORECASE,
+)
 
 
 def overlap_seconds(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
@@ -122,6 +141,93 @@ def dedupe_clips(clips: list[ClipProposal], *, threshold: float = 0.35) -> list[
     return sorted(kept, key=lambda c: c.start)
 
 
+def hook_score(text: str) -> float:
+    """Score « accroche » d'une phrase (0..1) : question, chiffre, promesse."""
+    text = text.strip()
+    if not text:
+        return 0.0
+    score = 0.0
+    if "?" in text or "؟" in text:
+        score += 0.35
+    if _NUMBER_RE.search(text):
+        score += 0.2
+    if _HOOK_RE.search(text):
+        score += 0.4
+    if text[:1].isupper() and len(text.split()) >= 4:
+        score += 0.05
+    return min(1.0, score)
+
+
+def anchor_to_hook(
+    start: float,
+    end: float,
+    segments: list[Segment],
+    *,
+    max_shift: float = 10.0,
+    min_hook: float = 0.45,
+) -> float:
+    """Décale le début de l'extrait vers la première phrase vraiment « accrocheuse ».
+
+    Un clip qui commence sur une phrase banale perd les 2 premières secondes ;
+    on le rapproche de la première phrase forte (question, chiffre, annonce).
+    """
+    if not segments:
+        return start
+
+    window = [s for s in segments if start - 1 <= s.start <= start + max_shift]
+    if not window:
+        return start
+
+    current = next((s for s in window if abs(s.start - start) < 0.6), None)
+    current_score = hook_score(current.text) if current else 0.0
+    if current_score >= min_hook:
+        return start
+
+    best = None
+    for segment in window:
+        score = hook_score(segment.text)
+        if score >= min_hook and (best is None or score > best[0]):
+            best = (score, segment.start)
+    if best is None:
+        return start
+    return best[1]
+
+
+def title_similarity(first: str, second: str) -> float:
+    """Similarité lexicale de deux titres (Jaccard sur les mots significatifs)."""
+    stop = {"the", "a", "an", "of", "and", "to", "in", "for", "with", "le", "la", "les", "de", "des", "du", "et", "en", "pour", "avec", "un", "une"}
+    tokens_a = {t for t in _WORD_RE.findall(first.lower()) if t not in stop}
+    tokens_b = {t for t in _WORD_RE.findall(second.lower()) if t not in stop}
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+def enforce_diversity(clips: list[Clip], *, max_similarity: float = 0.6) -> list[Clip]:
+    """Écarte les extraits qui parlent de la même chose (titres trop proches).
+
+    Les titres génériques (« Extrait ») ou trop courts ne sont pas comparés :
+    deux clips sans titre ne doivent pas être supprimés.
+    """
+    def comparable(title: str) -> bool:
+        if title.strip().lower() in {"", "extrait", "clip"}:
+            return False
+        return len([t for t in _WORD_RE.findall(title) if len(t) > 2]) >= 2
+
+    kept: list[Clip] = []
+    for clip in sorted(clips, key=lambda c: (-float(c.score), c.start)):
+        duplicate = False
+        for other in kept:
+            if not (comparable(clip.title) and comparable(other.title)):
+                continue
+            if title_similarity(clip.title, other.title) >= max_similarity:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(clip)
+    return sorted(kept, key=lambda c: c.start)
+
+
 def validate_proposals(
     proposals: list[ClipProposal],
     *,
@@ -147,6 +253,8 @@ def validate_proposals(
         )
         if segments and snap:
             start, end = snap_to_sentence_boundaries(start, end, segments)
+            # On ancre ensuite le début sur une phrase « accrocheuse ».
+            start = anchor_to_hook(start, end, segments)
             start, end = clamp_clip(
                 start,
                 end,
@@ -168,7 +276,7 @@ def validate_proposals(
 
     unique = dedupe_clips(cleaned)
     selected = unique[: max(1, limit)]
-    return [
+    clips = [
         Clip(
             index=i,
             start=clip.start,
@@ -181,6 +289,8 @@ def validate_proposals(
         )
         for i, clip in enumerate(selected, start=1)
     ]
+    # Deux extraits qui racontent la même chose ne sont pas deux extraits.
+    return enforce_diversity(clips)
 
 
 def score_segment(segment: Segment) -> float:

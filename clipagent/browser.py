@@ -258,6 +258,11 @@ class BrowserAnalyzer:
         if self.log:
             print(message, flush=True)
 
+    @property
+    def page(self):
+        """Page Playwright courante (utilisée pour lire le chat replay)."""
+        return self._page
+
     # --- Étape 1 : ouverture ----------------------------------------------
     def open(self) -> dict:
         """Ouvre la page et attend le lecteur."""
