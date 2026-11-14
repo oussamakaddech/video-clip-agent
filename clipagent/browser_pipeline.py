@@ -14,6 +14,8 @@ Aucun téléchargement de la VOD complète n'est effectué.
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -178,6 +180,22 @@ def analyze_in_browser(
         # (meilleur modèle, consignes différentes) sans re-capturer la vidéo.
         candidates_path = out_dir / "candidates.srt"
         candidates_path.write_text(transcript.to_srt(), encoding="utf-8")
+        spans_path = out_dir / "candidates.json"
+        spans_path.write_text(
+            json.dumps(
+                {
+                    "spans": [
+                        {"index": index, "start": start, "end": end,
+                         "fragment": f"cand_{index:02d}.webm"}
+                        for index, (start, end) in enumerate(candidate_spans, start=1)
+                    ],
+                    "duration": duration,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         print(f"  transcript candidat : {candidates_path}", flush=True)
         if not transcript.segments:
             plan.warnings.append("Aucune transcription obtenue : aucun extrait ne peut être proposé.")
@@ -294,6 +312,7 @@ def analyze_in_browser(
                 )
             except FFmpegError as exc:
                 plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
+                out_path.unlink(missing_ok=True)   # fichier vide laissé par ffmpeg
                 continue
             clip.path = str(out_path)
             rendered.append(str(out_path))
@@ -309,15 +328,30 @@ def analyze_in_browser(
     return plan
 
 
+def _load_candidate_spans(fragments: Path) -> list[dict]:
+    """Charge les fenêtres candidates (candidates.json) si elles existent."""
+    for candidate in (fragments / "candidates.json", fragments.parent / "candidates.json"):
+        if candidate.exists():
+            try:
+                # utf-8-sig : tolère le BOM des fichiers écrits par PowerShell
+                data = json.loads(candidate.read_text(encoding="utf-8-sig"))
+                return list(data.get("spans", []))
+            except (OSError, json.JSONDecodeError):
+                return []
+    return []
+
+
 def _detect_face(fragment: Path, duration: float):
-    """Cherche le visage du streamer dans le fragment (boîte élargie et carrée)."""
+    """Cherche le visage du streamer dans le fragment (boîte élargie, carrée, bornée)."""
     try:
         from .facecam import detect_face_in_video
 
         box = detect_face_in_video(fragment, samples=8, duration=max(10.0, duration))
         if box is None:
             return None
-        return box.padded(0.6).square()
+        # Les dimensions de la frame sont connues (le lecteur peut changer de
+        # qualité en cours de stream) : la boîte est bornée sur la frame réelle.
+        return box.padded(0.6).square().clamped(box.frame_width, box.frame_height)
     except Exception:  # noqa: BLE001 - la face cam est optionnelle
         return None
 
@@ -335,6 +369,7 @@ def finalize_from_fragments(
     output_dir: str | Path | None = None,
     padding: float = 1.5,
     style: ClipStyle | None = None,
+    language: str | None = None,
 ) -> Plan:
     """Re-rend les clips à partir des fragments déjà capturés (pas de re-capture).
 
@@ -348,30 +383,60 @@ def finalize_from_fragments(
     plan.style = style.name
 
     rendered: list[str] = []
+    spans = _load_candidate_spans(fragments)
+    if os.getenv("CLIPAGENT_DEBUG"):
+        print(f"[debug] fragments={fragments} spans={len(spans)}", flush=True)
     for clip in plan.clips:
         fragment = fragments / f"clip_{clip.index:02d}.webm"
+        offset = max(0.0, padding)
+
+        if not fragment.exists() and spans:
+            # Le clip peut être contenu dans une fenêtre candidate déjà capturée.
+            for span in spans:
+                if clip.start >= span["start"] and clip.end <= span["end"]:
+                    candidate = fragments / span["fragment"]
+                    if candidate.exists():
+                        fragment = candidate
+                        offset = clip.start - span["start"]
+                        break
+            if os.getenv("CLIPAGENT_DEBUG"):
+                print(f"[debug] clip #{clip.index} {clip.start}-{clip.end} -> {fragment}", flush=True)
+
         if not fragment.exists():
-            candidates = sorted(fragments.glob(f"clip_{clip.index:02d}.*"))
+            candidates = sorted(fragments.glob(f"clip_{clip.index:02d}.webm"))
             if not candidates:
                 plan.warnings.append(f"Fragment manquant pour l'extrait #{clip.index} ({fragment}).")
                 continue
             fragment = candidates[0]
 
-        offset = max(0.0, padding)
-        clip_segments = transcribe_media(
-            fragment,
-            model_name="tiny",
-            language=None,
-        )
+        try:
+            clip_segments = transcribe_media(
+                fragment,
+                model_name="tiny",
+                language=language,
+            )
+        except Exception as exc:  # noqa: BLE001 - le clip reste rendu, sans sous-titres
+            plan.warnings.append(
+                f"Transcription impossible pour l'extrait #{clip.index} ({fragment.name}) : "
+                f"{exc.__class__.__name__}"
+            )
+            clip_segments = []
         clip_transcript = Transcript(segments=clip_segments, source=str(fragment))
 
+        style_used = style or get_style(settings.style)
+        face_box = None
+        if style_used.facecam_enabled:
+            face_box = _detect_face(fragment, clip.duration)
+            if face_box is None:
+                plan.warnings.append(f"Visage non détecté pour l'extrait #{clip.index} : rendu sans face cam.")
+
         hook_text = ""
-        if style.hook_enabled:
+        if style_used.hook_enabled:
             hook_text = resolve_hook(
                 clip,
                 list(clip_transcript.segments),
-                max_chars=style.hook_max_chars,
-                uppercase=style.hook_uppercase,
+                max_chars=style_used.hook_max_chars,
+                uppercase=style_used.hook_uppercase,
             )
         clip.hook = hook_text
 
@@ -380,7 +445,7 @@ def finalize_from_fragments(
             clip_transcript,
             clip,
             ass_path,
-            style,
+            style_used,
             absolute=False,
             hook_text=hook_text,
             offset=offset,
@@ -395,10 +460,12 @@ def finalize_from_fragments(
                 end=offset + clip.duration,
                 settings=settings,
                 subtitles=ass_path,
-                style=style,
+                style=style_used,
+                face_box=face_box,
             )
         except FFmpegError as exc:
             plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
+            out_path.unlink(missing_ok=True)
             continue
         clip.path = str(out_path)
         rendered.append(str(out_path))

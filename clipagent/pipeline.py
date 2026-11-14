@@ -93,6 +93,21 @@ def _ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{rest:05.2f}"
 
 
+def _subtitle_style_line(style, *, canvas_height: int = 1920) -> str:
+    """Ligne de style ASS des sous-titres.
+
+    Quand la face cam est active, les sous-titres remontent au-dessus du
+    bandeau du visage (sinon ils passent dessous).
+    """
+    from dataclasses import replace
+
+    subtitle = style.subtitle
+    if getattr(style, "facecam_enabled", False):
+        bottom = int(canvas_height * (1 - getattr(style, "facecam_top_ratio", 0.67)))
+        subtitle = replace(subtitle, margin_v=bottom + 30)
+    return subtitle.to_ass_style("Sub")
+
+
 def write_clip_ass(
     transcript: Transcript,
     clip: Clip,
@@ -127,7 +142,7 @@ def write_clip_ass(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        style.subtitle.to_ass_style("Sub"),
+        _subtitle_style_line(style),
         style.hook_style.to_ass_style("Hook"),
         "",
         "[Events]",
@@ -254,14 +269,14 @@ def plan_clips(
 
 
 def _detect_face(video: Path, duration: float):
-    """Cherche le visage du streamer dans la source (boîte élargie et carrée)."""
+    """Cherche le visage du streamer dans la source (boîte élargie, carrée, bornée)."""
     try:
         from .facecam import detect_face_in_video
 
         box = detect_face_in_video(video, samples=8, duration=max(10.0, duration))
         if box is None:
             return None
-        return box.padded(0.6).square()
+        return box.padded(0.6).square().clamped(box.frame_width, box.frame_height)
     except Exception:  # noqa: BLE001 - la face cam est optionnelle
         return None
 
@@ -326,6 +341,10 @@ def render_plan(
             )
         except FFmpegError as exc:
             plan.warnings.append(f"Rendu de l'extrait #{clip.index} impossible : {exc}")
+            try:
+                clip_path.unlink(missing_ok=True)   # fichier vide laissé par ffmpeg
+            except OSError:
+                pass
             continue
         clip.path = str(clip_path)
         rendered.append(str(clip_path))

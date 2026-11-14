@@ -172,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_final.add_argument("--output", default="output", help="Dossier de sortie")
     p_final.add_argument("--transcript", help="Transcript SRT/VTT (sinon, sous-titres déduits du fragment)")
     p_final.add_argument("--style", choices=sorted(STYLES), help="Style visuel")
+    p_final.add_argument("--language", help="Langue de la transcription (ex: en)")
     p_final.add_argument("--padding", type=float, default=1.5, help="Marge avant/après (s)")
 
     return parser
@@ -191,6 +192,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         transcript=transcript,
         output_dir=args.output,
         padding=args.padding,
+        language=args.language,
     )
     save_report(plan, args.output)
     print(f"{len([c for c in plan.clips if c.path])} extrait(s) re-rendu(s) dans {args.output}")
@@ -326,7 +328,8 @@ def _plan_from_json(path: str | Path) -> Plan:
         duration=float(data.get("duration", 0.0) or 0.0),
         mode=data.get("mode", "llm"),
         model=data.get("model"),
-        warnings=list(data.get("warnings", []) or []),
+        # les avertissements du run précédent ne sont pas rejoués
+        warnings=[],
     )
     for item in data.get("clips", []) or []:
         plan.clips.append(

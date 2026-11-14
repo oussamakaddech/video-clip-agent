@@ -173,60 +173,83 @@ def build_facecam_filter_complex(
     margin: int = 140,
     content_top: bool = True,
     subs: str | None = None,
+    layout: str = "split",
+    top_ratio: float = 0.67,
 ) -> str:
-    """Chaîne de filtres « face cam » : contenu en haut, visage du streamer en bas.
+    """Chaîne de filtres « face cam ».
 
-    - ``content_top`` : la source 16:9 est réduite à la largeur et posée en haut
-      (le bas reste libre pour le visage) ;
+    - ``layout="split"`` : écran divisé — contenu sur les 2/3 du haut,
+      visage du streamer sur le 1/3 du bas (format court) ;
+    - ``layout="blurred"`` : contenu net en haut sur un fond flouté ;
     - ``shape="circle"`` : le visage est détouré en cercle (alpha via ``geq``).
+
+    Les webm produits par MediaRecorder déclarent parfois une résolution
+    d'en-tête fausse (ex. 284x160 pour des frames en 1280x720) : on normalise
+    donc la taille **avant** le recadrage, sinon ffmpeg refuse le crop.
     """
     x = int(max(0, face.x))  # type: ignore[attr-defined]
     y = int(max(0, face.y))  # type: ignore[attr-defined]
     w = int(max(8, face.width))  # type: ignore[attr-defined]
     h = int(max(8, face.height))  # type: ignore[attr-defined]
+    frame_w = int(getattr(face, "frame_width", 0) or 0)
+    frame_h = int(getattr(face, "frame_height", 0) or 0)
+    normalize = f"scale={frame_w}:{frame_h}," if frame_w > 0 and frame_h > 0 else ""
+
+    face_chain = f"[face]{normalize}crop={w}:{h}:{x}:{y},scale={face_size}:{face_size}"
+    if shape == "circle":
+        radius = face_size / 2
+        face_chain += (
+            ",format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+            f"a='if(lt(pow(X-{radius:.0f},{2})+pow(Y-{radius:.0f},{2}),{radius * radius:.0f}),255,0)'"
+        )
+    face_chain += "[facec]"
 
     parts: list[str] = []
-    if content_top:
-        # Fond flouté (copie agrandie) + contenu net en haut : la partie basse
-        # accueille le visage du streamer sans bande noire.
+    if layout == "split":
+        # Écran divisé : contenu net sur les 2/3 du haut (fond flouté pour
+        # combler la letterbox), visage du streamer dans le 1/3 du bas.
+        top_h = int(height * top_ratio)
+        face_y = height - face_size - margin
         parts.append(
             f"[main]split=3[bg][ct][face];"
-            f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"[bg]{normalize}scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,boxblur=24:3[blurred];"
-            f"[ct]scale={width}:-2[ctop];"
+            f"[ct]{normalize}scale={width}:-2[ctop];"
             f"[blurred][ctop]overlay=0:0[bg2]"
         )
+        parts.append(face_chain)
+        parts.append(f"[bg2][facec]overlay=(W-w)/2:{face_y}[ov]")
+    elif content_top:
+        # Fond flouté (copie agrandie) + contenu net en haut.
+        parts.append(
+            f"[main]split=3[bg][ct][face];"
+            f"[bg]{normalize}scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,boxblur=24:3[blurred];"
+            f"[ct]{normalize}scale={width}:-2[ctop];"
+            f"[blurred][ctop]overlay=0:0[bg2]"
+        )
+        parts.append(face_chain)
         parts.append("[bg2][facec]overlay=" + _overlay_position(position, margin) + "[ov]")
-        face_chain = f"[face]crop={w}:{h}:{x}:{y},scale={face_size}:{face_size}"
-        if shape == "circle":
-            radius = face_size / 2
-            face_chain += (
-                ",format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
-                f"a='if(lt(pow(X-{radius:.0f},{2})+pow(Y-{radius:.0f},{2}),{radius * radius:.0f}),255,0)'"
-            )
-        parts.insert(len(parts) - 1, face_chain + "[facec]")
     else:
         parts.append(
-            f"[main]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"[main]{normalize}scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height}:(iw-ow)/2:(ih-oh)/2,setsar=1,format=yuv420p[bg]"
         )
-        face_chain = f"[face]crop={w}:{h}:{x}:{y},scale={face_size}:{face_size}"
-        if shape == "circle":
-            radius = face_size / 2
-            face_chain += (
-                ",format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
-                f"a='if(lt(pow(X-{radius:.0f},{2})+pow(Y-{radius:.0f},{2}),{radius * radius:.0f}),255,0)'"
-            )
-        parts.append(face_chain + "[facec]")
+        parts.append(face_chain)
         parts.append("[bg][facec]overlay=" + _overlay_position(position, margin) + "[ov]")
 
     if subs:
         sub_path = escape_filter_path(subs)
-        style = (
-            "FontName=Arial,FontSize=48,PrimaryColour=&H00FFFFFF,"
-            "OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,MarginV=90,Alignment=2"
-        )
-        parts.append(f"[ov]subtitles='{sub_path}':force_style='{style}'[v]")
+        if str(subs).lower().endswith(".ass"):
+            # Un ASS porte ses propres styles : ne surtout pas les écraser
+            # (sinon l'accroche et les sous-titres perdent leur position).
+            parts.append(f"[ov]subtitles='{sub_path}'[v]")
+        else:
+            style = (
+                "FontName=Arial,FontSize=48,PrimaryColour=&H00FFFFFF,"
+                "OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,MarginV=90,Alignment=2"
+            )
+            parts.append(f"[ov]subtitles='{sub_path}':force_style='{style}'[v]")
     else:
         parts.append("[ov]null[v]")
     return ";".join(parts)
@@ -261,6 +284,8 @@ def build_cut_command(
     face_position: str = "bottom-center",
     face_shape: str = "circle",
     face_margin: int = 140,
+    face_layout: str = "split",
+    face_top_ratio: float = 0.67,
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -283,6 +308,8 @@ def build_cut_command(
             margin=face_margin,
             content_top=True,
             subs=subtitles,
+            layout=face_layout,
+            top_ratio=face_top_ratio,
         )]
         command += ["-map", "[v]", "-map", "0:a?"]
     else:
@@ -391,6 +418,8 @@ def render_clip(
     face_position = "bottom-center"
     face_shape = "circle"
     face_margin = 140
+    face_layout = "split"
+    face_top_ratio = 0.67
     if style is not None:
         zoom = getattr(style, "zoom", 1.0) or 1.0
         crop = getattr(style, "crop", "center") or "center"
@@ -398,6 +427,8 @@ def render_clip(
         face_position = getattr(style, "facecam_position", "bottom-center")
         face_shape = getattr(style, "facecam_shape", "circle")
         face_margin = getattr(style, "facecam_margin", 140)
+        face_layout = getattr(style, "facecam_layout", "split")
+        face_top_ratio = getattr(style, "facecam_top_ratio", 0.67)
 
     command = build_cut_command(
         ffmpeg,
@@ -417,6 +448,8 @@ def render_clip(
         face_position=face_position,
         face_shape=face_shape,
         face_margin=face_margin,
+        face_layout=face_layout,
+        face_top_ratio=face_top_ratio,
     )
     run(command)
     return output

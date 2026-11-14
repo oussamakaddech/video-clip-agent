@@ -25,6 +25,8 @@ class FaceBox:
     width: int
     height: int
     score: float = 0.0
+    frame_width: int = 0      # dimensions de l'image d'origine (0 = inconnu)
+    frame_height: int = 0
 
     def padded(self, ratio: float = 0.6) -> "FaceBox":
         """Rectangle élargi autour du visage (le visage seul est trop serré)."""
@@ -36,6 +38,8 @@ class FaceBox:
             width=self.width + 2 * pad_x,
             height=self.height + 2 * pad_y,
             score=self.score,
+            frame_width=self.frame_width,
+            frame_height=self.frame_height,
         )
 
     def square(self) -> "FaceBox":
@@ -49,6 +53,23 @@ class FaceBox:
             width=int(side),
             height=int(side),
             score=self.score,
+            frame_width=self.frame_width,
+            frame_height=self.frame_height,
+        )
+
+    def clamped(self, frame_width: int, frame_height: int) -> "FaceBox":
+        """Ramène la boîte à l'intérieur de l'image (un crop hors cadre échoue)."""
+        frame_width = frame_width or self.frame_width
+        frame_height = frame_height or self.frame_height
+        if frame_width <= 0 or frame_height <= 0:
+            return self
+        width = max(8, min(self.width, frame_width))
+        height = max(8, min(self.height, frame_height))
+        x = max(0, min(self.x, frame_width - width))
+        y = max(0, min(self.y, frame_height - height))
+        return FaceBox(
+            x=x, y=y, width=width, height=height, score=self.score,
+            frame_width=frame_width, frame_height=frame_height,
         )
 
     def to_dict(self) -> dict:
@@ -67,7 +88,11 @@ def _detector():
 
 
 def detect_face_in_image(path: str | Path) -> FaceBox | None:
-    """Cherche un visage dans une image (le plus grand trouvé)."""
+    """Cherche un visage dans une image (le plus grand trouvé).
+
+    La boîte est bornée à l'image : une détection sur une image périmée ou
+    d'une résolution différente ne peut pas casser le recadrage ffmpeg.
+    """
     import cv2
 
     image = cv2.imread(str(path))
@@ -80,13 +105,16 @@ def detect_face_in_image(path: str | Path) -> FaceBox | None:
     if faces is None or len(faces) == 0:
         return None
     best = max(faces, key=lambda f: float(f[2] * f[3]))
-    return FaceBox(
+    box = FaceBox(
         x=int(best[0]),
         y=int(best[1]),
         width=int(best[2]),
         height=int(best[3]),
         score=float(best[-1]),
+        frame_width=width,
+        frame_height=height,
     )
+    return box.clamped(width, height)
 
 
 def detect_face_in_video(
@@ -119,6 +147,7 @@ def detect_face_in_video(
     try:
         for index, moment in enumerate(times):
             frame_path = tmp_dir / f"probe_{index:02d}.jpg"
+            frame_path.unlink(missing_ok=True)   # pas de frame périmée
             ok = _extract_frame(video, moment, frame_path)
             if not ok:
                 continue
@@ -165,6 +194,7 @@ def _probe_duration(video: Path) -> float:
 def _extract_frame(video: Path, timestamp: float, target: Path) -> bool:
     from .ffmpeg import resolve_ffmpeg
 
+    target.unlink(missing_ok=True)
     try:
         ffmpeg = resolve_ffmpeg()
         subprocess.run(
@@ -179,6 +209,7 @@ def _extract_frame(video: Path, timestamp: float, target: Path) -> bool:
             capture_output=True,
             check=True,
         )
-        return target.exists()
+        return target.exists() and target.stat().st_size > 0
     except Exception:  # noqa: BLE001
+        target.unlink(missing_ok=True)
         return False

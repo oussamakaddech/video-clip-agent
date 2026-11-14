@@ -99,6 +99,8 @@ class ClipStyle:
     facecam_position: str = "bottom-center"   # bottom-center | bottom-left | bottom-right
     facecam_shape: str = "circle"             # circle | square
     facecam_margin: int = 140
+    facecam_layout: str = "split"             # split (2/3 + 1/3) | blurred
+    facecam_top_ratio: float = 0.67           # part de l'écran réservée au contenu
 
     def is_rtl(self) -> bool:
         return self.subtitle.rtl or self.hook_style.rtl
@@ -130,7 +132,10 @@ STYLES: dict[str, ClipStyle] = {
         ),
         hook_max_chars=42,
         facecam_enabled=True,
-        facecam_size=340,
+        facecam_size=560,
+        facecam_layout="split",
+        facecam_top_ratio=0.67,
+        facecam_margin=40,
     ),
     "hype": _style(
         "hype",

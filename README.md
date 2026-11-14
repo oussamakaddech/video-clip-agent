@@ -226,6 +226,29 @@ clipagent render --plan output\clips_plan.json --video .\arabe.mp4 --transcript 
 * le rendu passe par **libass** : la mise en forme des lettres (shaping) et
   l'ordre droite-à-gauche sont corrects, ponctuation arabe comprise (`؟`).
 
+## 3d. Face cam — le visage du streamer en bas du clip
+
+Sur les lives, le streamer apparaît souvent dans un coin de l'image. Pour un
+format vertical, ce visage est **redétecté** (OpenCV YuNet) puis **superposé
+en bas**, dans un cercle, sur un fond flouté :
+
+```
+┌──────────────────────┐
+│  contenu (16:9)      │  ← net, en haut
+│                      │
+├──────────────────────┤
+│  fond flouté         │
+│         ( ◕ )        │  ← visage du streamer, en cercle
+│      sous-titres     │
+└──────────────────────┘
+```
+
+* activé par le style `tiktok` (désactivé pour `default`, `clean`, `podcast`) ;
+* si aucun visage n'est trouvé, le clip est rendu normalement (avec un
+  avertissement dans le rapport) ;
+* position et taille réglables : `bottom-center` / `bottom-left` / `bottom-right`,
+  taille 320 px par défaut.
+
 ## 4. Comment l'agent décide
 
 L'agent (OpenAI Agents SDK) ne fait que **proposer** des extraits via l'outil

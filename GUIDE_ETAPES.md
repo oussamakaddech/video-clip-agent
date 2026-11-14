@@ -36,6 +36,19 @@ Options utiles :
 | `--headed` | off | afficher le navigateur (débogage) |
 | `--style` | default | style visuel (`tiktok`, `arabic`…) |
 
+### Face cam (visage du streamer en bas)
+
+Le style `tiktok` active le **face cam** : le visage du streamer est détecté
+(OpenCV YuNet) dans la source et superposé **en bas** du clip vertical, dans un
+cercle, sur un fond flouté. Sans visage détecté, le clip est rendu normalement.
+
+Pour l'activer sur un autre style, ou le désactiver :
+
+```powershell
+clipagent browse --url "…" --style tiktok          # face cam activé
+clipagent browse --url "…" --style reels            # sans face cam
+```
+
 ### Ce que ça fait, étape par étape
 
 1. **Storyboard** : une image JPEG par `--step` secondes, prélevée dans le
