@@ -50,6 +50,29 @@ Copy-Item .env.example .env
 
 ## 2. Utilisation
 
+### Parcours livestream (Kick / VOD longue)
+
+```powershell
+# 1. Télécharger la VOD
+clipagent fetch --url "https://kick.com/xxx/videos/123456" --out downloads
+
+# 2. Transcrire en local (Whisper)
+clipagent transcribe --video .\downloads\vod.mp4 --output .\vod.srt --model small --language fr
+
+# 3. Sélectionner les moments forts (12 extraits par défaut)
+clipagent plan --video .\downloads\vod.mp4 --transcript .\vod.srt --output output --profile livestream
+
+# 4. Rendre les extraits verticaux
+clipagent render --plan output\clips_plan.json --video .\downloads\vod.mp4 --transcript .\vod.srt --output output
+```
+
+> **VOD de plusieurs heures** : la transcription est découpée en portions
+> (12 000 caractères) analysées une par une par l'agent, puis les propositions
+> sont fusionnées, dédoublonnées et triées. `--max-chunks` borne le nombre de
+> portions analysées (12 par défaut) pour maîtriser le nombre d'appels LLM.
+
+### Parcours classique
+
 ```powershell
 # a) Analyser une vidéo + transcription (sans rendre)
 clipagent plan --video .\ma-video.mp4 --transcript .\ma-video.srt --output output
@@ -77,8 +100,18 @@ Options principales :
 | `--aspect` | `9:16` | format de sortie (`9:16`, `16:9`, `1:1`) |
 | `--model` | `gpt-4o-mini` | modèle LLM (tout modèle compatible OpenAI) |
 | `--instruction` | — | consigne libre (« cible les passages techniques »…) |
+| `--profile` | `default` | préréglage : `livestream` (12 extraits), `podcast`, `short` |
 | `--no-subtitles` | off | désactive l'incrustation des sous-titres |
 | `--ffmpeg` | auto | chemin explicite de ffmpeg |
+
+### Profils
+
+| Profil | Extraits | Durée min–max | Usage |
+|---|---|---|---|
+| `default` | 5 | 20–90 s | usage général |
+| `short` | 3 | 15–45 s | TikTok / Reels |
+| `podcast` | 6 | 30–120 s | extraits plus longs |
+| `livestream` | 12 | 25–90 s | VOD de live (beaucoup de pics) |
 
 ## 3. Sorties (`output/`)
 

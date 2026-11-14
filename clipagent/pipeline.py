@@ -24,6 +24,7 @@ class Plan:
     duration: float = 0.0
     mode: str = "llm"
     model: str | None = None
+    chunks: int = 0
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -33,20 +34,36 @@ class Plan:
             "duration": round(self.duration, 2),
             "mode": self.mode,
             "model": self.model,
+            "chunks": self.chunks,
             "warnings": list(self.warnings),
             "clips": [clip.to_dict() for clip in self.clips],
         }
 
 
-def write_clip_srt(transcript: Transcript, clip: Clip, path: str | Path) -> Path:
-    """Écrit un SRT décalé sur l'extrait (pour le sous-titrage incrusté)."""
+def write_clip_srt(
+    transcript: Transcript,
+    clip: Clip,
+    path: str | Path,
+    *,
+    absolute: bool = True,
+) -> Path:
+    """Écrit un SRT pour l'extrait, à incruster par ffmpeg.
+
+    ``absolute=True`` conserve les horodatages de la source : c'est ce qu'attend
+    le filtre ``subtitles`` quand la découpe se fait en seek de sortie
+    (``-ss`` placé après ``-i``), car les images filtrées portent encore le
+    horodatage d'origine. En seek d'entrée, utiliser ``absolute=False``.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     blocks = []
     index = 1
     for segment in transcript.window(clip.start, clip.end):
-        start = max(0.0, segment.start - clip.start)
-        end = min(clip.duration, segment.end - clip.start)
+        if absolute:
+            start, end = segment.start, segment.end
+        else:
+            start = max(0.0, segment.start - clip.start)
+            end = min(clip.duration, segment.end - clip.start)
         if end <= start:
             continue
         blocks.append(
@@ -56,7 +73,9 @@ def write_clip_srt(transcript: Transcript, clip: Clip, path: str | Path) -> Path
         )
         index += 1
     if not blocks:
-        blocks.append(f"1\n{format_timestamp(0)} --> {format_timestamp(clip.duration)}\n{clip.title}\n")
+        blocks.append(
+            f"1\n{format_timestamp(clip.start)} --> {format_timestamp(clip.end)}\n{clip.title}\n"
+        )
     path.write_text("\n".join(blocks), encoding="utf-8")
     return path
 
@@ -91,14 +110,16 @@ def plan_clips(
     want_llm = settings.api_key if use_llm is None else use_llm
     if want_llm:
         try:
-            from .llm import run_agent
+            from .llm import run_agent_chunked
 
-            proposals, context = run_agent(
+            proposals, chunks = run_agent_chunked(
                 transcript,
                 settings,
                 duration=media_duration,
                 extra_instruction=instruction or settings.instruction,
+                max_chunks=settings.max_chunks,
             )
+            plan.chunks = chunks
             if not proposals:
                 plan.warnings.append("L'agent n'a proposé aucun extrait : repli heuristique utilisé.")
         except Exception as exc:  # noqa: BLE001 - on ne doit jamais perdre le pipeline
@@ -196,6 +217,8 @@ def save_report(plan: Plan, output_dir: str | Path) -> tuple[Path, Path]:
         lines.append(f"- **Transcription** : `{plan.transcript_source}`")
     lines.append(f"- **Durée** : {plan.duration:.1f} s")
     lines.append(f"- **Mode de sélection** : {plan.mode}" + (f" ({plan.model})" if plan.model and plan.mode == "llm" else ""))
+    if plan.chunks:
+        lines.append(f"- **Portions analysées** : {plan.chunks}")
     lines.append("")
     if plan.warnings:
         lines += ["## Avertissements", ""] + [f"- {w}" for w in plan.warnings] + [""]

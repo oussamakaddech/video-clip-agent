@@ -1,0 +1,69 @@
+Bonjour à tous, bienvenue dans cet épisode sur l|automatisation du clipping vidéo.
+
+Aujourd'hui on va répondre à une question très concrète : comment transformer une vidéo de quarante minutes en cinq extraits courts que les gens regardent vraiment ?
+
+La réponse tient en une phrase : il faut séparer l'analyse de la transcription, et le montage.
+
+Concrètement, un agent lit la transcription, il repère les moments forts, puis un outil de montage découpe la vidéo.
+
+Ce qui change par rapport à un simple coupe-coupe, c'est que l'agent comprend le sens de ce qui se dit.
+
+On commence par la partie la plus simple : comment on obtient la transcription.
+
+On utilise Whisper, dans sa version rapide, directement en local sur votre machine.
+
+La clé, c'est de segmenter. Whisper nous donne des blocs de quelques secondes, avec un début et une fin.
+
+Ces blocs sont exactement ce dont l'agent a besoin pour proposer des extraits cohérents.
+
+Une nuance importante : ne coupez jamais un extrait au milieu d'une phrase, sinon la coupe est incompréhensible.
+
+Pour ça, on recale les bornes sur les extrémités des phrases détectées dans la transcription.
+
+Voyons maintenant comment l'agent choisit ses extraits.
+
+On lui donne un contrat simple : entre vingt et quatre-vingt-dix secondes par extrait, et cinq extraits au total.
+
+Et surtout on lui demande un format vertical, parce que c'est là que la vidéo est regardée aujourd'hui.
+
+L'agent parcourt la transcription avec des outils : il lit une fenêtre, il en propose une autre si nécessaire.
+
+C'est un vrai dialogue avec les données, pas une passe aveugle sur l'ensemble du texte.
+
+Voilà ce qui se passe en pratique quand on lance l'analyse sur notre épisode.
+
+Le premier extrait retenu, c'est celui où je donne la définition du clipping, à la deuxième minute.
+
+Il commence par une question, et il se termine sur une promesse. C'est la structure idéale pour du contenu court.
+
+Le deuxième extrait, c'est le passage sur Whisper, et il commence par la clé, c'est de segmenter.
+
+On voit bien l'importance de la phase de validation. Sans elle, l'agent aurait proposé des phrases coupées.
+
+Troisième extrait : le moment où je donne les chiffres. Nous avons doublé l'engagement en un mois.
+
+C'est exactement le rôle de l'agent. Il ne comprend pas seulement les mots, il comprend l'intention de la phrase.
+
+Passons au montage proprement dit, c'est la partie que beaucoup de gens sautent.
+
+On utilise FFmpeg, parce que c'est la seule façon fiable de couper sans perdre la synchronisation audio.
+
+On coupe précisément, on recadre au format neuf seize, et on incruste les sous-titres de la transcription.
+
+Le sous-titrage, c'est ce qui change vraiment le taux de visionnage sur les réseaux sociaux.
+
+Petite astuce : on incruste les sous-titres en blanc, avec un contour noir. Sinon on ne les lit pas sur fond clair.
+
+Et on extrait systématiquement une vignette pour chaque extrait. Ça sert de couverture dans le rapport.
+
+Dernier point : on peut concaténer tous les extraits dans une seule vidéo best of.
+
+C'est pratique pour une newsletter, ou pour un récapitulatif de fin de webinaire.
+
+Récapitulons : une transcription, un agent qui sélectionne, une validation stricte, et FFmpeg qui rend.
+
+Si vous voulez aller plus loin, le point d'entrée à retenir est le suivant.
+
+Ce n'est pas l'outil qui fait la valeur. C'est la définition des moments que vous voulez mettre en avant.
+
+Merci de votre écoute, et à bientôt pour un nouvel épisode.

@@ -25,10 +25,19 @@ Le résultat est inattendu : nous avons doublé l'engagement en un mois.
 def test_write_clip_srt_shifts_timestamps(tmp_path):
     transcript = Transcript(segments=parse_srt(SRT))
     clip = Clip(index=1, start=6.0, end=18.0, title="Accroche")
-    path = write_clip_srt(transcript, clip, tmp_path / "clip.srt")
+    path = write_clip_srt(transcript, clip, tmp_path / "clip.srt", absolute=False)
     content = path.read_text(encoding="utf-8")
     assert content.startswith("1\n")
     assert "00:00:00,000 --> 00:00:12,000" in content
+
+
+def test_write_clip_srt_keeps_absolute_timestamps(tmp_path):
+    """Le filtre subtitles de ffmpeg attend les horodatages de la source."""
+    transcript = Transcript(segments=parse_srt(SRT))
+    clip = Clip(index=1, start=6.0, end=18.0, title="Accroche")
+    path = write_clip_srt(transcript, clip, tmp_path / "clip_abs.srt", absolute=True)
+    content = path.read_text(encoding="utf-8")
+    assert "00:00:06,000 --> 00:00:18,000" in content
 
 
 def test_plan_clips_uses_heuristic_without_api_key(tmp_path, monkeypatch):
@@ -52,7 +61,7 @@ def test_plan_clips_records_agent_failure_as_warning(tmp_path, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("réseau indisponible")
 
-    monkeypatch.setattr(llm_module, "run_agent", boom)
+    monkeypatch.setattr(llm_module, "run_agent_chunked", boom)
     plan = plan_clips(None, transcript, settings)
     assert plan.mode == "heuristic"
     assert any("réseau indisponible" in w for w in plan.warnings)

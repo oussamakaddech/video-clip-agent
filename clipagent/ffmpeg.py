@@ -143,7 +143,7 @@ def build_crop_filter(width: int, height: int, *, crop: str | None = "center") -
     """Filtre de recadrage 9:16 (ou 16:9) centré sur la source."""
     if crop and crop not in {"center", "top"}:
         return f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}"
-    y_offset = "(ih-ow)/2" if crop != "top" else "0"
+    y_offset = "(ih-oh)/2" if crop != "top" else "0"
     return (
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height}:(iw-ow)/2:{y_offset},"
@@ -164,6 +164,7 @@ def build_cut_command(
     subtitles: str | Path | None = None,
     fast: bool = False,
     crop: str | None = "center",
+    subtitle_size: int | None = None,
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -181,8 +182,9 @@ def build_cut_command(
 
     if subtitles:
         sub_path = escape_filter_path(subtitles)
+        size = subtitle_size if subtitle_size else 14
         style = (
-            "FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,"
+            f"FontName=Arial,FontSize={size},PrimaryColour=&H00FFFFFF,"
             "OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=48,Alignment=2"
         )
         filters.append(f"subtitles='{sub_path}':force_style='{style}'")
@@ -269,6 +271,7 @@ def render_clip(
         aspect=settings.aspect_ratio,
         subtitles=subtitles,
         fast=fast,
+        subtitle_size=settings.subtitle_size,
     )
     run(command)
     return output

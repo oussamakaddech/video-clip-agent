@@ -3,32 +3,38 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
-from .config import Settings
-from .ffmpeg import FFmpegError, probe
-from .models import Clip
+from .config import PROFILES, Settings
+from .ffmpeg import FFmpegError, probe, resolve_ffmpeg
+from .models import Clip, Segment
 from .pipeline import Plan, plan_clips, render_plan, save_report
-from .transcript import load_transcript
+from .transcript import Transcript, load_transcript
 
 
 def _settings_from_args(args: argparse.Namespace) -> Settings:
+    """Construit les réglages : arguments de la CLI > environnement > profil."""
     overrides = {
-        "model": args.model,
-        "api_key": args.api_key,
-        "base_url": args.base_url,
+        "model": getattr(args, "model", None),
+        "api_key": getattr(args, "api_key", None),
+        "base_url": getattr(args, "base_url", None),
         "chat_completions": True if getattr(args, "chat_completions", False) else None,
         "strict_tools": False if getattr(args, "non_strict_tools", False) else None,
-        "min_clip_seconds": args.min_clip,
-        "max_clip_seconds": args.max_clip,
-        "num_clips": args.num_clips,
-        "aspect_ratio": args.aspect,
-        "ffmpeg_binary": args.ffmpeg,
-        "output_dir": Path(args.output) if args.output else None,
-        "burn_subtitles": False if args.no_subtitles else None,
-        "instruction": args.instruction,
+        "profile": getattr(args, "profile", None),
+        "max_chunks": getattr(args, "max_chunks", None),
+        "min_clip_seconds": getattr(args, "min_clip", None),
+        "max_clip_seconds": getattr(args, "max_clip", None),
+        "num_clips": getattr(args, "num_clips", None),
+        "aspect_ratio": getattr(args, "aspect", None),
+        "ffmpeg_binary": getattr(args, "ffmpeg", None),
+        "output_dir": Path(args.output) if getattr(args, "output", None) else None,
+        "burn_subtitles": False if getattr(args, "no_subtitles", False) else None,
+        "instruction": getattr(args, "instruction", None),
     }
     return Settings.from_env(**{k: v for k, v in overrides.items() if v is not None})
 
@@ -42,10 +48,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_common(p: argparse.ArgumentParser, *, needs_video: bool = True, needs_transcript: bool = True):
-        if needs_video:
-            p.add_argument("--video", required=True, help="Chemin de la vidéo source")
+        p.add_argument(
+            "--video",
+            required=needs_video,
+            help="Chemin de la vidéo source (optionnel pour `plan` : sert à connaître la durée)",
+        )
         if needs_transcript:
             p.add_argument("--transcript", required=True, help="Transcription (SRT/VTT)")
+        p.add_argument("--url", help="URL de la VOD (Kick/YouTube/Twitch) : téléchargée automatiquement")
+        p.add_argument("--profile", choices=sorted(PROFILES), help="Préréglage (livestream pour les VOD longues)")
+        p.add_argument("--max-chunks", type=int, help="Nombre maximum de portions de transcript analysées")
         p.add_argument("--output", default="output", help="Dossier de sortie")
         p.add_argument("--model", help="Modèle LLM (défaut: gpt-4o-mini)")
         p.add_argument("--api-key", help="Clé API (défaut: OPENAI_API_KEY)")
@@ -98,7 +110,82 @@ def build_parser() -> argparse.ArgumentParser:
     p_info = sub.add_parser("info", help="Afficher les métadonnées d'une vidéo")
     p_info.add_argument("--video", required=True)
 
+    p_doc = sub.add_parser("doctor", help="Vérifier l'environnement (ffmpeg, Whisper, modèle LLM)")
+    p_doc.add_argument("--skip-llm", action="store_true", help="Ne pas tester l'endpoint LLM")
+
+    p_fetch = sub.add_parser("fetch", help="Télécharger une VOD (Kick, YouTube, Twitch…)")
+    p_fetch.add_argument("--url", required=True, help="URL de la VOD")
+    p_fetch.add_argument("--out", default="downloads", help="Dossier de destination")
+    p_fetch.add_argument("--cookies-from-browser", help="chrome|firefox|edge : cookies du navigateur")
+    p_fetch.add_argument("--max-height", type=int, default=1080, help="Hauteur maximale (défaut: 1080)")
+
     return parser
+
+
+def cmd_fetch(args: argparse.Namespace) -> int:
+    """Télécharge une VOD et affiche le chemin du fichier."""
+    from .download import download
+
+    settings = _settings_from_args(args)
+    path = download(
+        args.url,
+        settings=settings,
+        out_dir=args.out,
+        cookies_from_browser=args.cookies_from_browser,
+        max_height=args.max_height,
+    )
+    print(f"VOD téléchargée : {path}")
+    print(f"Suite : clipagent transcribe --video \"{path}\" --output .\\vod.srt --model small")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Diagnostic complet de l'environnement."""
+    import platform
+
+    print(f"Python        : {platform.python_version()} ({platform.system()})")
+    try:
+        ffmpeg = resolve_ffmpeg()
+        version = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True).stdout.splitlines()[0]
+        print(f"ffmpeg        : OK — {version}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"ffmpeg        : MANQUANT — {exc}")
+
+    try:
+        import importlib.util
+
+        print(f"Whisper       : {'OK (faster-whisper installé)' if importlib.util.find_spec('faster_whisper') else 'absent (optionnel)'}")
+    except Exception:  # pragma: no cover
+        print("Whisper       : inconnu")
+
+    settings = _settings_from_args(args)
+    print(f"Modèle        : {settings.model}")
+    print(f"Base URL      : {settings.base_url or 'https://api.openai.com/v1 (défaut)'}")
+    print(f"Clé API       : {'présente' if settings.api_key else 'ABSENTE (mode heuristique)'}")
+
+    if args.skip_llm:
+        return 0
+    if not settings.api_key:
+        print("Test LLM      : ignoré (pas de clé)")
+        return 0
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=settings.api_key,
+            base_url=settings.base_url or None,
+            timeout=60.0,
+        )
+        response = client.chat.completions.create(
+            model=settings.model,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=5,
+        )
+        print(f"Test LLM      : OK — {response.choices[0].message.content!r}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Test LLM      : ECHEC — {exc.__class__.__name__}: {exc}")
+    return 0
 
 
 def _plan_from_json(path: str | Path) -> Plan:
@@ -126,10 +213,24 @@ def _plan_from_json(path: str | Path) -> Plan:
     return plan
 
 
+def _resolve_video(args: argparse.Namespace, settings: Settings) -> str | None:
+    """Retourne la vidéo à traiter : fichier local, ou VOD téléchargée à la demande."""
+    url = getattr(args, "url", None)
+    if url:
+        from .download import download
+
+        print(f"Téléchargement de {url} …")
+        path = download(url, settings=settings, out_dir=settings.download_dir)
+        print(f"VOD téléchargée : {path}")
+        return str(path)
+    return getattr(args, "video", None)
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     transcript = load_transcript(args.transcript)
-    plan = plan_clips(getattr(args, "video", None), transcript, settings, instruction=args.instruction or "")
+    video = _resolve_video(args, settings)
+    plan = plan_clips(video, transcript, settings, instruction=args.instruction or "")
     json_path, md_path = save_report(plan, args.output)
     if args.json_out:
         Path(args.json_out).parent.mkdir(parents=True, exist_ok=True)
@@ -166,8 +267,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     settings = _settings_from_args(args)
     from .pipeline import run_pipeline
 
+    video = _resolve_video(args, settings)
     plan = run_pipeline(
-        args.video,
+        video,
         args.transcript,
         settings,
         instruction=args.instruction or "",
@@ -185,6 +287,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cuda_available() -> bool:
+    """Vérifie que les bibliothèques CUDA nécessaires à ctranslate2 sont chargeables."""
+    if os.name != "nt":
+        try:
+            import ctranslate2
+
+            return ctranslate2.get_cuda_device_count() > 0
+        except Exception:  # pragma: no cover
+            return False
+    for dll in ("cublas64_12.dll", "cublas64_11.dll", "cublas64_10.dll"):
+        try:
+            ctypes.WinDLL(dll)
+            return True
+        except OSError:
+            continue
+    return False
+
+
 def cmd_transcribe(args: argparse.Namespace) -> int:
     try:
         from faster_whisper import WhisperModel
@@ -195,22 +315,61 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    model = WhisperModel(args.model, device=args.device, compute_type=args.compute_type)
-    segments, info = model.transcribe(args.video, language=args.language, vad_filter=True)
-    from .transcript import Transcript
-    from .models import Segment
 
-    transcript = Transcript(
-        segments=[
+    # Contrôle préalable : une vidéo sans piste audio ne peut pas être transcrite.
+    try:
+        media = probe(args.video)
+        if not media.has_audio:
+            print(
+                f"Cette vidéo n'a pas de piste audio ({media.aspect_ratio}, "
+                f"{media.duration:.0f} s) : rien à transcrire.\n"
+                "Les enregistrements d'écran (Playwright/observatoire) sont muets : "
+                "fournissez une vidéo avec du son, ou un fichier SRT/VTT déjà prêt.",
+                file=sys.stderr,
+            )
+            return 3
+    except FFmpegError:
+        pass
+
+    model = None
+    device = args.device
+    if device == "auto":
+        device = "cuda" if _cuda_available() else "cpu"
+    elif device == "cuda" and not _cuda_available():
+        print("CUDA indisponible (cublas absent) → repli CPU.", file=sys.stderr)
+        device = "cpu"
+
+    try:
+        model = WhisperModel(args.model, device=device, compute_type=args.compute_type)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Chargement du modèle impossible : {exc}", file=sys.stderr)
+        return 4
+
+    print(f"Transcription en cours (modèle {args.model}, {device}) …", file=sys.stderr)
+    try:
+        segments, info = model.transcribe(args.video, language=args.language, vad_filter=True)
+        collected = [
             Segment(index=i, start=s.start, end=s.end, text=s.text.strip())
             for i, s in enumerate(segments, start=1)
-        ],
-        source=str(args.video),
-    )
+        ]
+    except RuntimeError as exc:
+        if device != "cpu":
+            print(f"Échec GPU ({exc}) → nouvelle tentative sur CPU…", file=sys.stderr)
+            model = WhisperModel(args.model, device="cpu", compute_type="int8")
+            segments, info = model.transcribe(args.video, language=args.language, vad_filter=True)
+            collected = [
+                Segment(index=i, start=s.start, end=s.end, text=s.text.strip())
+                for i, s in enumerate(segments, start=1)
+            ]
+        else:
+            print(f"Transcription impossible : {exc}", file=sys.stderr)
+            return 4
+
+    transcript = Transcript(segments=collected, source=str(args.video))
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(transcript.to_srt(), encoding="utf-8")
-    print(f"Transcription écrite dans {out} (langue détectée : {info.language})")
+    print(f"Transcription écrite dans {out} ({len(collected)} segments, langue : {info.language})")
     return 0
 
 
@@ -232,6 +391,8 @@ COMMANDS = {
     "run": cmd_run,
     "transcribe": cmd_transcribe,
     "info": cmd_info,
+    "doctor": cmd_doctor,
+    "fetch": cmd_fetch,
 }
 
 

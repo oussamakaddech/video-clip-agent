@@ -18,8 +18,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-whisper = ["faster-whisper>=1.0"]
-dev = ["pytest>=8.0", "imageio-ffmpeg>=0.5"]
+whisper = ["faster-whisper>=1.0", "av<16"]
+download = ["yt-dlp>=2025.1"]
+dev = ["pytest>=8.0", "imageio-ffmpeg>=0.5", "faster-whisper>=1.0", "av<16", "yt-dlp>=2025.1"]
 
 [project.scripts]
 clipagent = "clipagent.cli:main"

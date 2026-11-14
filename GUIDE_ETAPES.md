@@ -1,10 +1,56 @@
 # Guide étape par étape — clipagent
 
-Objectif : transformer **une vidéo + sa transcription** en **5 extraits verticaux sous-titrés**.
+Objectif : transformer **une vidéo + sa transcription** en **extraits verticaux sous-titrés**.
+
+Deux parcours : le **parcours court** (vidéo courte) et le **parcours livestream**
+(VOD de plusieurs heures, typiquement Kick).
 
 Durée totale : ~5 minutes de mise en route, puis 1 commande par étape.
 
 ---
+
+## Parcours livestream (Kick) — le cas principal
+
+```powershell
+cd $HOME\Desktop\video-clip-agent
+.\.venv\Scripts\Activate.ps1
+
+# 1. Télécharger la VOD ( Kick, YouTube, Twitch… )
+clipagent fetch --url "https://kick.com/xxxx/videos/123456" --out downloads
+#    → affiche le chemin du fichier téléchargé
+
+# 2. Transcrire (Whisper local : rien ne sort de la machine)
+clipagent transcribe --video .\downloads\<fichier>.mp4 --output .\vod.srt --model small --language fr
+
+# 3. Choisir les extraits (profil livestream : 12 extraits, 25–90 s)
+clipagent plan --video .\downloads\<fichier>.mp4 --transcript .\vod.srt --output output --profile livestream
+
+# 4. Rendre (1080×1920, sous-titres incrustés)
+clipagent render --plan output\clips_plan.json --video .\downloads\<fichier>.mp4 --transcript .\vod.srt --output output
+```
+
+### Points spécifiques au livestream
+
+| Sujet | Réponse |
+|---|---|
+| **Durée** | une VOD de 4 h n'entre pas dans un seul prompt : le transcript est **découpé en portions** (12 000 caractères) et chaque portion est analysée par l'agent, puis les propositions sont fusionnées et dédoublonnées. `--max-chunks` limite le nombre de portions analysées (12 par défaut). |
+| **Coût LLM** | 1 appel par portion. Pour une VOD de 4 h, comptez ~15 à 25 portions → `--max-chunks 8` pour un premier passage rapide. |
+| **Transcription** | `small` sur CPU : ~1× le temps réel (4 h de VOD ≈ 2 à 4 h de calcul). Astuce : `--model base` pour aller 3× plus vite, `medium` si l'audio est bruité. |
+| **VOD sans audio** | les enregistrements d'écran sont muets → message explicite, pas de crash. |
+| **VOD protégés** | `--cookies-from-browser chrome` pour les streams réservés (le compte doit être connecté dans le navigateur). |
+| **Choix des moments** | le profil `livestream` demande à l'agent de cibler les pics (réaction, annonce, chiffre, moment drôle, question du chat) et d'ignorer les phases vides. |
+| **Durée des clips** | 25–90 s (format short). Pour des « extraits » de 2–3 min : `--max-clip 180 --min-clip 60`. |
+
+### Variante tout-en-un
+
+```powershell
+clipagent run --url "https://kick.com/…/videos/…" --transcript .\vod.srt --output output --profile livestream
+```
+(téléchargement + analyse + rendu ; le transcript doit déjà exister)
+
+---
+
+## Parcours court (vidéo de quelques minutes)
 
 ## Étape 0 — Environnement (déjà fait sur cette machine ✔)
 

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .config import Settings
-from .models import ClipProposal
+from .models import ClipProposal, Segment
 from .transcript import Transcript
 
 AGENT_INSTRUCTIONS = """
@@ -51,6 +51,20 @@ disponibles plutôt que de ne rien retourner.
 """.strip()
 
 
+LIVESTREAM_GUIDANCE = """
+CONTEXTE LIVESTREAM (VOD longue)
+- Une VOD de plusieurs heures contient des phases très différentes : lancement,
+  discussion,jeu, réaction au chat, annonce, démonstration, débat, fin de stream.
+- Cherche les pics : reaction vive du streamer, moment drôle, annonce importante,
+  chiffre marquant, émotion forte, réponse à une question du chat, palmares.
+- Ignore les phases vides : attente, discussion administrative, générique de fin,
+  pauses longues sans contenu.
+- Chaque extrait doit rester compréhensible sans avoir vu le reste du live :
+  commence par une phrase qui pose le sujet.
+- Ne propose jamais deux extraits qui parlent de la même chose.
+""".strip()
+
+
 @dataclass
 class AgentContext:
     """Mémoire partagée entre l'agent et ses outils."""
@@ -60,6 +74,8 @@ class AgentContext:
     min_clip: float = 20.0
     max_clip: float = 90.0
     max_clips: int = 5
+    chunk_start: float = 0.0
+    chunk_end: float = 0.0
     proposals: list[ClipProposal] = field(default_factory=list)
     finished: bool = False
     notes: list[str] = field(default_factory=list)
@@ -146,9 +162,13 @@ def build_agent(settings: Settings, context: AgentContext):
     """Construit l'agent OpenAI Agents SDK."""
     from agents import Agent, ModelSettings
 
+    instructions = AGENT_INSTRUCTIONS
+    if settings.profile == "livestream":
+        instructions = f"{instructions}\n\n{LIVESTREAM_GUIDANCE}"
+
     return Agent(
         name="Highlight Analyst",
-        instructions=AGENT_INSTRUCTIONS,
+        instructions=instructions,
         model=resolve_model(settings),
         tools=_build_tools(context, strict=settings.strict_tools),
         model_settings=ModelSettings(
@@ -164,6 +184,8 @@ def build_user_request(settings: Settings, context: AgentContext, extra_instruct
     request = (
         "Analyse la transcription ci-dessous et sélectionne les meilleurs extraits.\n\n"
         f"- Durée de la vidéo : {duration:.1f} s\n"
+        f"- Plage couverte par CETTE portion de transcription : "
+        f"{context.chunk_start:.1f} s → {context.chunk_end:.1f} s\n"
         f"- Nombre d'extraits souhaité : {context.max_clips}\n"
         f"- Durée d'un extrait : entre {context.min_clip:.0f} s et {context.max_clip:.0f} s\n"
         f"- Format cible : {settings.aspect_ratio} ({settings.width}x{settings.height})\n"
@@ -191,12 +213,15 @@ def run_agent(
     """Exécute l'agent et renvoie les propositions brutes + le contexte."""
     import os
 
-    from agents import Runner
+    from agents import RunConfig, Runner
 
     if settings.api_key:
         os.environ.setdefault("OPENAI_API_KEY", settings.api_key)
     if settings.base_url:
         os.environ.setdefault("OPENAI_BASE_URL", settings.base_url)
+    if not settings.tracing:
+        # Le tracing du SDK appelle l'API OpenAI : inutile (et 401) avec un endpoint tiers.
+        os.environ.setdefault("OPENAI_AGENTS_DISABLE_TRACING", "1")
 
     context = AgentContext(
         transcript=transcript,
@@ -207,8 +232,89 @@ def run_agent(
     )
     agent = build_agent(settings, context)
     request = build_user_request(settings, context, extra_instruction)
-    Runner.run_sync(agent, request, max_turns=max_turns)
+    run_config = RunConfig(tracing_disabled=not settings.tracing)
+    Runner.run_sync(agent, request, max_turns=max_turns, run_config=run_config)
     return context.proposals, context
+
+
+def split_transcript(
+    transcript: Transcript,
+    *,
+    chunk_chars: int = 12_000,
+    overlap_chars: int = 800,
+) -> list[list[Segment]]:
+    """Découpe la transcription en portions analysables par l'agent.
+
+    Une VOD de plusieurs heures ne tient pas dans un seul prompt : on analyse
+    donc la transcription portion par portion, avec un léger recouvrement pour
+    ne pas couper un extrait au milieu d'une phrase.
+    """
+    if not transcript.segments:
+        return []
+
+    chunks: list[list[Segment]] = []
+    current: list[Segment] = []
+    size = 0
+
+    for segment in transcript.segments:
+        current.append(segment)
+        size += len(segment.text)
+
+        if size >= chunk_chars:
+            chunks.append(current)
+            # recouvrement : les derniers segments sont rejoués au début de la portion suivante
+            overlap = current[-2:] if len(current) >= 2 else current[-1:]
+            current = list(overlap)
+            size = sum(len(s.text) for s in overlap)
+
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def run_agent_chunked(
+    transcript: Transcript,
+    settings: Settings,
+    *,
+    duration: float | None = None,
+    extra_instruction: str = "",
+    max_chunks: int | None = None,
+) -> tuple[list[ClipProposal], int]:
+    """Analyse la transcription portion par portion et fusionne les propositions.
+
+    Retourne les propositions et le nombre de portions analysées.
+    """
+    chunks = split_transcript(transcript, chunk_chars=settings.chunk_chars)
+    if max_chunks:
+        chunks = chunks[:max_chunks]
+    if not chunks:
+        return [], 0
+
+    all_proposals: list[ClipProposal] = []
+    for chunk in chunks:
+        sub = Transcript(segments=chunk, source=transcript.source)
+        context = AgentContext(
+            transcript=sub,
+            duration=duration or transcript.duration,
+            min_clip=settings.min_clip_seconds,
+            max_clip=settings.max_clip_seconds,
+            max_clips=settings.num_clips,
+            chunk_start=chunk[0].start,
+            chunk_end=chunk[-1].end,
+        )
+        agent = build_agent(settings, context)
+        request = build_user_request(settings, context, extra_instruction)
+        from agents import RunConfig, Runner
+
+        if not settings.tracing:
+            import os
+
+            os.environ.setdefault("OPENAI_AGENTS_DISABLE_TRACING", "1")
+        run_config = RunConfig(tracing_disabled=not settings.tracing)
+        Runner.run_sync(agent, request, max_turns=25, run_config=run_config)
+        all_proposals.extend(context.proposals)
+
+    return all_proposals, len(chunks)
 
 
 def parse_llm_json(payload: Any) -> list[ClipProposal]:
