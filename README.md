@@ -89,6 +89,18 @@ curl -X POST http://127.0.0.1:8765/api/jobs \
 Chaque tâche tourne dans un **thread** dédié : l'API reste responsive, et le
 progrès est poussé en direct vers l'interface.
 
+### Interface web
+
+- **Thème clair / sombre** (bouton 🌙, mémorisé) — les deux thèmes sont définis par variables CSS.
+- **Pastilles d'état** en direct : IA, ffmpeg, Whisper, OpenCV, modèle utilisé — le test du fournisseur LLM est fait **en arrière-plan** pour ne pas bloquer l'affichage.
+- **Assistant en 3 étapes** numérotées (source → réglages → lancement), avec ligne de liaison verticale.
+- **Suivi en direct** : barre de progression animée, indicateur pulsant, journal horodaté, 4 métriques (durée, extraits, taille disque, étapes).
+- **Résultats** : cartes vidéo 9:16 avec badge n°, durée, titre, score, accroche mis en évidence, boutons *Rapport* / *Télécharger* ; encart *Best-of* ; bouton « tout télécharger ».
+- **Squelettes de chargement** pendant la génération, **toasts** de notification, **historique** des tâches cliquable (la tâche est rechargée via `#job=<id>`).
+- **Glisser-déposer** pour la vidéo et la transcription, **raccourci clavier** `Ctrl+Entrée` pour lancer, `prefers-reduced-motion` respecté.
+
+Hook d'automatisation (tests e2e, pilotage console) : `window.clipagent.{start,watch,openJob,renderResults}`.
+
 ### Robustesse du backend
 
 | Protection | Détail |

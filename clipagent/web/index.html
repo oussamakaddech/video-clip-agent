@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
   <title>clipagent — Agent IA de clipping vidéo</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
@@ -10,118 +11,184 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">🎬</span>
+      <div class="logo">🎬</div>
       <div>
         <h1>clipagent</h1>
         <p>Transforme une VOD en extraits verticaux sous-titrés — sans la télécharger.</p>
       </div>
     </div>
-    <div class="status" id="health">
-      <span class="dot"></span><span id="health-text">vérification…</span>
+
+    <div class="topbar-right">
+      <div class="chips" id="health-chips"></div>
+      <button class="icon-btn" id="btn-theme" title="Thème clair / sombre" aria-label="Changer de thème">🌙</button>
     </div>
   </header>
 
   <main class="layout">
-    <!-- Colonne gauche : formulaire -->
-    <section class="panel">
-      <h2>Nouvelle tâche</h2>
+    <!-- ============ Colonne de composition ============ -->
+    <section class="card">
+      <div class="card-head">
+        <h2>Nouvelle tâche</h2>
+        <span class="chip" id="shortcut-hint"><span class="kbd">Ctrl</span> + <span class="kbd">Entrée</span></span>
+      </div>
 
-      <label class="field">
-        <span>Source</span>
-        <div class="tabs" id="source-tabs">
-          <button class="tab active" data-mode="url">URL de la VOD</button>
-          <button class="tab" data-mode="file">Fichier vidéo</button>
-          <button class="tab" data-mode="transcript">Transcription</button>
+      <div class="card-body">
+        <!-- Étape 1 -->
+        <div class="step" data-n="1">
+          <div class="step-title">Source</div>
+
+          <div class="seg" id="source-tabs" role="tablist">
+            <button role="tab" aria-selected="true" data-mode="url">URL de la VOD</button>
+            <button role="tab" aria-selected="false" data-mode="file">Fichier vidéo</button>
+            <button role="tab" aria-selected="false" data-mode="transcript">Transcription</button>
+          </div>
+
+          <label class="field hidden" id="field-url">
+            <span>Adresse de la VOD</span>
+            <input type="url" id="input-url" placeholder="https://kick.com/pseudo/videos/…" autocomplete="off" />
+            <small>La VOD n'est jamais téléchargée en entier : le projet lit le lecteur dans le navigateur.</small>
+          </label>
+
+          <label class="field hidden" id="field-file">
+            <span>Vidéo locale</span>
+            <div class="drop" id="drop-file">
+              <strong>Déposer une vidéo ici</strong>
+              <span>ou cliquer pour parcourir · mp4, mkv, webm, mov</span>
+              <input type="file" id="input-file" accept="video/*" class="hidden" />
+            </div>
+          </label>
+
+          <label class="field hidden" id="field-transcript">
+            <span>Transcription</span>
+            <div class="drop" id="drop-transcript">
+              <strong>Déposer une transcription ici</strong>
+              <span>ou cliquer pour parcourir · .srt, .vtt</span>
+              <input type="file" id="input-transcript" accept=".srt,.vtt,text/plain" class="hidden" />
+            </div>
+          </label>
         </div>
-      </label>
 
-      <label class="field hidden" id="field-url">
-        <span>URL (Kick, YouTube, Twitch…)</span>
-        <input type="url" id="input-url" placeholder="https://kick.com/…/videos/…" />
-        <small>La VOD n'est jamais téléchargée en entier : le projet lit le lecteur dans le navigateur.</small>
-      </label>
+        <!-- Étape 2 -->
+        <div class="step" data-n="2">
+          <div class="step-title">Réglages</div>
 
-      <label class="field hidden" id="field-file">
-        <span>Vidéo locale</span>
-        <input type="file" id="input-file" accept="video/*" />
-        <small id="file-name">Aucun fichier sélectionné.</small>
-      </label>
+          <div class="grid2">
+            <label class="field">
+              <span>Style</span>
+              <select id="input-style"></select>
+            </label>
+            <label class="field">
+              <span>Langue</span>
+              <select id="input-language">
+                <option value="">auto</option>
+                <option value="en">anglais</option>
+                <option value="fr">français</option>
+                <option value="ar">arabe</option>
+                <option value="es">espagnol</option>
+              </select>
+            </label>
+          </div>
 
-      <label class="field hidden" id="field-transcript">
-        <span>Transcription (.srt / .vtt)</span>
-        <input type="file" id="input-transcript" accept=".srt,.vtt,text/plain" />
-        <small id="transcript-name">Aucun fichier sélectionné.</small>
-      </label>
+          <div class="grid3">
+            <label class="field">
+              <span>Extraits</span>
+              <input type="number" id="input-num" min="1" max="20" value="6" />
+            </label>
+            <label class="field">
+              <span>Min (s)</span>
+              <input type="number" id="input-min" min="5" max="600" value="45" />
+            </label>
+            <label class="field">
+              <span>Max (s)</span>
+              <input type="number" id="input-max" min="10" max="900" value="75" />
+            </label>
+          </div>
 
-      <div class="grid2">
-        <label class="field">
-          <span>Style</span>
-          <select id="input-style"></select>
-        </label>
-        <label class="field">
-          <span>Langue</span>
-          <select id="input-language">
-            <option value="">auto</option>
-            <option value="en">anglais</option>
-            <option value="fr">français</option>
-            <option value="ar">arabe</option>
-            <option value="es">espagnol</option>
-          </select>
-        </label>
+          <label class="field">
+            <span>Consigne pour l'agent</span>
+            <textarea id="input-instruction" rows="2" placeholder="ex. cible les moments où il parle de son produit"></textarea>
+          </label>
+
+          <div class="row">
+            <label class="check"><input type="checkbox" id="input-subs" checked /> Sous-titres</label>
+            <label class="check"><input type="checkbox" id="input-facecam" /> Face cam</label>
+            <label class="check"><input type="checkbox" id="input-render" checked /> Rendre</label>
+          </div>
+        </div>
+
+        <!-- Étape 3 -->
+        <div class="step" data-n="3">
+          <div class="step-title">Lancement</div>
+          <button class="primary" id="btn-start">▶ Lancer le clipping</button>
+          <p class="hint" id="start-hint"></p>
+        </div>
       </div>
-
-      <div class="grid3">
-        <label class="field">
-          <span>Extraits</span>
-          <input type="number" id="input-num" min="1" max="20" value="6" />
-        </label>
-        <label class="field">
-          <span>Durée min (s)</span>
-          <input type="number" id="input-min" min="5" max="600" value="45" />
-        </label>
-        <label class="field">
-          <span>Durée max (s)</span>
-          <input type="number" id="input-max" min="10" max="900" value="75" />
-        </label>
-      </div>
-
-      <label class="field">
-        <span>Consigne pour l'agent (optionnel)</span>
-        <textarea id="input-instruction" rows="2" placeholder="ex. cible les moments où il parle de son produit"></textarea>
-      </label>
-
-      <div class="row">
-        <label class="check"><input type="checkbox" id="input-subs" checked /> Sous-titres</label>
-        <label class="check"><input type="checkbox" id="input-facecam" /> Face cam</label>
-        <label class="check"><input type="checkbox" id="input-render" checked /> Rendre les clips</label>
-      </div>
-
-      <button class="primary" id="btn-start">Lancer le clipping</button>
-      <p class="hint" id="start-hint"></p>
     </section>
 
-    <!-- Colonne droite : suivi + résultats -->
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Suivi</h2>
-        <span class="badge" id="job-badge">aucune tâche</span>
+    <!-- ============ Colonne de travail ============ -->
+    <section style="display: flex; flex-direction: column; gap: 22px;">
+      <!-- Suivi -->
+      <div class="card">
+        <div class="card-head">
+          <h2>Suivi en direct</h2>
+          <span class="chip" id="job-badge">aucune tâche</span>
+        </div>
+        <div class="card-body">
+          <div class="progress"><div class="bar" id="bar"></div></div>
+          <div class="status-line">
+            <span class="pulse-dot" id="pulse" hidden></span>
+            <span id="message">Aucune tâche en cours — lancez un clipping à gauche.</span>
+          </div>
+
+          <div class="metrics" id="metrics" hidden>
+            <div class="metric"><b id="m-elapsed">0 s</b><span>durée</span></div>
+            <div class="metric"><b id="m-clips">0</b><span>extraits</span></div>
+            <div class="metric"><b id="m-size">0 Mo</b><span>sur disque</span></div>
+            <div class="metric"><b id="m-steps">0</b><span>étapes</span></div>
+          </div>
+
+          <details class="logs" id="logs-box">
+            <summary>Journal d'exécution</summary>
+            <pre id="logs">—</pre>
+          </details>
+        </div>
       </div>
 
-      <div class="progress"><div class="bar" id="bar"></div></div>
-      <p class="message" id="message">Aucune tâche en cours.</p>
+      <!-- Résultats -->
+      <div class="card">
+        <div class="card-head">
+          <h2>Extraits produits</h2>
+          <div style="display: flex; gap: 8px;">
+            <button class="ghost" id="btn-copy-report" hidden>Copier le rapport</button>
+            <button class="ghost" id="btn-download-all" hidden>Tout télécharger</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="results" id="results">
+            <div class="empty">Les extraits apparaîtront ici, avec aperçu vidéo et téléchargement direct.</div>
+          </div>
+        </div>
+      </div>
 
-      <details class="logs" id="logs-box" open>
-        <summary>Journal</summary>
-        <pre id="logs"></pre>
-      </details>
-
-      <div id="results" class="results"></div>
+      <!-- Historique -->
+      <div class="card">
+        <div class="card-head">
+          <h2>Tâches précédentes</h2>
+          <button class="ghost" id="btn-refresh-history">Actualiser</button>
+        </div>
+        <div class="card-body">
+          <div class="history" id="history"><div class="empty" style="padding:18px;">Aucune tâche.</div></div>
+        </div>
+      </div>
     </section>
   </main>
 
   <footer>
-    <span id="footer-note">clipagent — OpenAI Agents SDK · Whisper local · FFmpeg</span>
+    clipagent · OpenAI Agents SDK · Whisper local · FFmpeg ·
+    <kbd>Ctrl</kbd>+<kbd>Entrée</kbd> pour lancer
   </footer>
+
+  <div class="toasts" id="toasts"></div>
 
   <script src="/static/app.js"></script>
 </body>
