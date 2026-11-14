@@ -413,6 +413,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         padding=args.padding,
         language=args.language,
         browser_url=getattr(args, "url", None),
+        whisper_model=getattr(args, "whisper", None) or "small",
     )
     save_report(plan, args.output)
     print(f"{len([c for c in plan.clips if c.path])} extrait(s) re-rendu(s) dans {args.output}")

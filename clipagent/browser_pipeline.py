@@ -388,6 +388,7 @@ def finalize_from_fragments(
     style: ClipStyle | None = None,
     language: str | None = None,
     browser_url: str | None = None,
+    whisper_model: str = "small",
 ) -> Plan:
     """Re-rend les clips à partir des fragments déjà capturés (pas de re-capture).
 
@@ -433,7 +434,8 @@ def finalize_from_fragments(
                 continue
 
         rendered_path = _render_from_fragment(
-            clip, fragment, offset, settings, style, fragments, out_dir, language, plan
+            clip, fragment, offset, settings, style, fragments, out_dir, language, plan,
+            whisper_model=whisper_model,
         )
         if rendered_path:
             rendered.append(rendered_path)
@@ -441,7 +443,8 @@ def finalize_from_fragments(
     # Clips non couverts par un fragment : capture navigateur à la demande.
     if missing and browser_url:
         rendered += _render_missing_with_browser(
-            missing, browser_url, settings, style, fragments, out_dir, language, plan
+            missing, browser_url, settings, style, fragments, out_dir, language, plan,
+            whisper_model=whisper_model,
         )
     elif missing:
         for clip in missing:
@@ -467,12 +470,13 @@ def _render_from_fragment(
     out_dir: Path,
     language: str | None,
     plan: Plan,
+    whisper_model: str = "small",
 ) -> str | None:
     """Rend un clip depuis un fragment local (sous-titres + accroche + face cam)."""
     try:
         clip_segments = transcribe_media(
             fragment,
-            model_name="tiny",
+            model_name=whisper_model,
             language=language,
         )
     except Exception as exc:  # noqa: BLE001 - le clip reste rendu, sans sous-titres
@@ -539,6 +543,7 @@ def _render_missing_with_browser(
     out_dir: Path,
     language: str | None,
     plan: Plan,
+    whisper_model: str = "small",
 ) -> list[str]:
     """Capture et rend les clips qui ne sont couverts par aucun fragment."""
     from .browser import BrowserAnalyzer
@@ -557,7 +562,8 @@ def _render_missing_with_browser(
                 plan.warnings.append(f"Capture de l'extrait #{clip.index} impossible : {exc}")
                 continue
             path = _render_from_fragment(
-                clip, fragment, clip.start - start, settings, style, fragments, out_dir, language, plan
+                clip, fragment, clip.start - start, settings, style, fragments, out_dir, language, plan,
+                whisper_model=whisper_model,
             )
             if path:
                 rendered.append(path)

@@ -144,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_final.add_argument("--transcript", help="Transcript SRT/VTT (sinon, sous-titres déduits du fragment)")
     p_final.add_argument("--style", choices=sorted(STYLES), help="Style visuel")
     p_final.add_argument("--language", help="Langue de la transcription (ex: en)")
+    p_final.add_argument(
+        "--whisper",
+        default="small",
+        help="Modèle Whisper pour les sous-titres (tiny, base, small, medium) — small = meilleur compromis",
+    )
     p_final.add_argument("--padding", type=float, default=1.5, help="Marge avant/après (s)")
     p_final.add_argument(
         "--url",

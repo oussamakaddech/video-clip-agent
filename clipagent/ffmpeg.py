@@ -175,6 +175,8 @@ def build_facecam_filter_complex(
     subs: str | None = None,
     layout: str = "split",
     top_ratio: float = 0.67,
+    sharpen: float = 0.6,
+    enhance: bool = True,
 ) -> str:
     """Chaîne de filtres « face cam ».
 
@@ -205,6 +207,13 @@ def build_facecam_filter_complex(
     face_chain += "[facec]"
 
     parts: list[str] = []
+    quality_chain = ""
+    sharpen_filter = build_sharpen_filter(sharpen)
+    if sharpen_filter:
+        quality_chain += sharpen_filter + ","
+    if enhance:
+        quality_chain += build_enhance_filter() + ","
+
     if layout == "cam-bottom":
         # Layout « référence » : contenu sur le haut (couvre la zone),
         # caméra du streamer PLEIN CADRE sur la bande du bas.
@@ -213,11 +222,11 @@ def build_facecam_filter_complex(
         parts.append(
             f"[main]split=2[ct][cam];"
             f"[ct]{normalize}scale={width}:{top_h}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{top_h}:(iw-ow)/2:(ih-oh)/2,setsar=1,"
+            f"crop={width}:{top_h}:(iw-ow)/2:(ih-oh)/2,{quality_chain}setsar=1,"
             f"pad={width}:{height}:0:0:color=black[ctop];"
             f"[cam]{normalize}crop={w}:{h}:{x}:{y},"
             f"scale={width}:{band}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{band}:(iw-ow)/2:(ih-oh)/2,setsar=1[camc]"
+            f"crop={width}:{band}:(iw-ow)/2:(ih-oh)/2,{quality_chain}setsar=1[camc]"
         )
         parts.append(f"[ctop][camc]overlay=0:{top_h}[ov]")
     elif layout == "split":
@@ -319,6 +328,29 @@ def build_overlay_chain(
     return current, extra_inputs
 
 
+def build_sharpen_filter(strength: float = 0.6) -> str:
+    """Accentuation après agrandissement : compense le flou de l'upscale.
+
+    Une source 360p montée en 1080×1920 est molle ; un ``unsharp`` mesuré
+    rend le texte lisible à nouveau.
+    """
+    if strength <= 0:
+        return ""
+    return f"unsharp=5:5:{strength:.2f}:5:5:0.0"
+
+
+def build_enhance_filter(
+    *,
+    contrast: float = 1.06,
+    brightness: float = 0.012,
+    saturation: float = 1.08,
+) -> str:
+    """Ajustement léger du rendu (les écrans de stream sont souvent ternes)."""
+    return (
+        f"eq=contrast={contrast:.3f}:brightness={brightness:.3f}:saturation={saturation:.3f}"
+    )
+
+
 def build_cut_command(
     ffmpeg: str,
     video: str | Path,
@@ -334,7 +366,7 @@ def build_cut_command(
     crop: str | None = "center",
     subtitle_size: int | None = None,
     zoom: float = 1.0,
-    fps: int = 25,
+    fps: int = 30,
     face_box: object | None = None,
     face_size: int = 320,
     face_position: str = "bottom-center",
@@ -344,6 +376,9 @@ def build_cut_command(
     face_top_ratio: float = 0.67,
     logo: str | Path | None = None,
     logo_size: int = 120,
+    sharpen: float = 0.6,
+    enhance: bool = True,
+    crf: int = 18,
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -367,6 +402,8 @@ def build_cut_command(
             subs=subtitles,
             layout=face_layout,
             top_ratio=face_top_ratio,
+            sharpen=sharpen,
+            enhance=enhance,
         )
         label, logo_inputs = build_overlay_chain(
             "v", width=width, height=height, logo=logo, logo_size=logo_size
@@ -392,6 +429,18 @@ def build_cut_command(
         zoom_filter = build_zoom_filter(width, height, zoom, fps=fps)
         if zoom_filter:
             filters.append(zoom_filter)
+
+        sharpen_filter = build_sharpen_filter(sharpen)
+        if sharpen_filter:
+            filters.append(sharpen_filter)
+        if enhance:
+            filters.append(build_enhance_filter())
+
+        sharpen_filter = build_sharpen_filter(sharpen)
+        if sharpen_filter:
+            filters.append(sharpen_filter)
+        if enhance:
+            filters.append(build_enhance_filter())
 
         if subtitles:
             sub_path = escape_filter_path(subtitles)
@@ -421,10 +470,15 @@ def build_cut_command(
 
     command += [
         "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "21",
+        "-preset", "slow",
+        "-crf", str(crf),
+        "-profile:v", "high",
+        "-level", "4.1",
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", "192k",
+        "-ar", "48000",
         "-movflags", "+faststart",
         str(output),
     ]

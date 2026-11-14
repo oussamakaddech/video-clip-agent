@@ -259,6 +259,22 @@ webcam bouge entre deux images, une illustration reste figée.
 clipagent finalize --plan output\clips_plan.json --fragments output\work --style streamer --no-subtitles
 ```
 
+## 3e. Réglages de qualité (actifs par défaut)
+
+| Réglage | Valeur | Pourquoi |
+|---|---|---|
+| `unsharp=5:5:0.6` | après l'agrandissement | une source 360p/480p montée en 1080×1920 est molle : l'accentuation rend le texte lisible |
+| `eq=contrast=1.06:brightness=0.012:saturation=1.08` | léger | les écrans de stream sont ternes |
+| `libx264 -crf 18 -preset slow -profile:v high` | CRF 18 | CRF 21 → 18 : ~30 % de détails en plus (fichier ~1,5× plus gros) |
+| `-r 30` | constant | évite les à-coups de cadence |
+| `aac 192k / 48 kHz` | audio | voix plus nette |
+| Whisper `small` | sous-titres | `--whisper small` : bien plus fiable que `tiny` |
+
+```powershell
+# rendu haute qualité
+clipagent finalize --plan output\clips_plan.json --fragments output\work --style streamer --whisper small
+```
+
 ## 4. Comment l'agent décide (le « niveau de clipping »)
 
 ```
