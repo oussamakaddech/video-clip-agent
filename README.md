@@ -111,6 +111,19 @@ Hook d'automatisation (tests e2e, pilotage console) : `window.clipagent.{start,w
 | **Annulation** | `DELETE /api/jobs/{id}` interrompt la tâche au prochain point de progression |
 | **Rétention** | `purge(keep=20)` supprime les tâches terminées les plus anciennes |
 | **Diagnostic fournisseur** | `GET /api/provider` teste la joignabilité du modèle (NVIDIA / OpenAI / Ollama) |
+| **Persistance des tâches** | chaque tâche est écrite dans `output/.jobs/<id>.json` et **rechargée au démarrage** : les liens de téléchargement survivent à un redémarrage |
+| **Cache de transcription** | empreinte SHA-1 du média → le SRT est réutilisé (2 s au lieu de 40 s sur un même fichier) |
+| **Configuration éditable** | `GET/POST /api/config` lit et écrit le `.env` (modèle, endpoint, clé, Whisper, codec, CRF…) sans toucher aux fichiers à la main |
+| **Mesures par phase** | chaque tâche publie ses durées (téléchargement / transcription / analyse / rendu), affichées dans l'interface |
+
+### L'interface en un coup d'œil
+
+- **Tableau de bord** : tâches, extraits produits, durée cumulée, espace disque.
+- **Timeline** : la position de chaque extrait dans la source (cliquable).
+- **Fiche extrait** (clic sur une vignette) : position, score, accroche, justification, mots-clés, actions.
+- **Mesures de phase** affichées sous le journal : où part réellement le temps.
+- **Réglages persistés** : modèle, endpoint, clé API et modèle Whisper modifiables depuis l'interface (écrits dans le `.env`).
+- **Démarrage rapide** : trois boutons (VOD / vidéo / transcription) qui pré-remplissent le formulaire.
 
 ### Couche de service
 

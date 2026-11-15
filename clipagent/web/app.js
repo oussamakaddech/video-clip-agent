@@ -260,7 +260,19 @@
         $("pulse").hidden = true;
         source.close();
         renderResults(jobId, data.result);
+        renderTimeline(data.result);
+        loadDashboard();
+        refreshDiskUsage(jobId);
         loadHistory();
+        const timings = data.timings || {};
+        const box = $("timings");
+        const entries = Object.entries(timings);
+        if (entries.length) {
+          box.hidden = false;
+          box.innerHTML = entries
+            .map(([key, value]) => `<span class="timing">${escapeHtml(key)} : ${Number(value).toFixed(1)} s</span>`)
+            .join("");
+        }
         toast("Clipping terminé", `${(data.result?.clips || []).length} extrait(s) prêt(s)`, "ok");
         fetch(`/api/jobs/${jobId}/usage`)
           .then((r) => r.json())
@@ -328,8 +340,9 @@
       const card = document.createElement("div");
       card.className = "clip";
       card.style.animationDelay = `${index * 55}ms`;
+      card.dataset.index = clip.index;
       card.innerHTML = `
-        <div class="thumb">
+        <div class="thumb" role="button" tabindex="0" data-detail="${clip.index}" title="Voir la fiche">
           ${hasFile ? `<video controls preload="metadata" playsinline src="${source}"></video>` : ""}
           <span class="badge-top">#${clip.index}</span>
           <span class="dur" data-size="${clip.index}">${Math.round(clip.duration)} s</span>
@@ -398,6 +411,16 @@
 
     box.querySelectorAll("[data-compare]").forEach((button) => {
       button.addEventListener("click", () => openCompare(Number(button.dataset.compare)));
+    });
+
+    // Fiche détaillée au clic sur la vignette
+    box.querySelectorAll("[data-detail]").forEach((element) => {
+      const index = Number(element.dataset.detail);
+      const clip = result.clips.find((c) => c.index === index);
+      element.addEventListener("click", (event) => {
+        if (event.target.tagName === "VIDEO") return;   // on laisse le lecteur vidéo
+        if (clip) openDetail(clip, jobId);
+      });
     });
 
     $("edit-hint").hidden = false;
@@ -606,6 +629,7 @@
       $("pulse").hidden = job.status !== "running";
       $("job-badge").textContent = jobId.slice(0, 8);
       if (job.result) renderResults(jobId, job.result);
+      if (job.result) renderTimeline(job.result);
       if (job.status === "running") watch(jobId);
     } catch (err) {
       toast("Tâche introuvable", String(err.message || err), "error");
@@ -613,6 +637,136 @@
   }
 
   $("btn-refresh-history").addEventListener("click", loadHistory);
+
+  /* ================= Tableau de bord ================= */
+  async function loadDashboard() {
+    try {
+      const jobs = await (await fetch("/api/jobs")).json();
+      let clips = 0;
+      let duration = 0;
+      for (const job of jobs) {
+        const result = job.result || {};
+        for (const clip of result.clips || []) {
+          clips += 1;
+          duration += clip.duration || 0;
+        }
+      }
+      $("k-tasks").textContent = String(jobs.length);
+      $("k-clips").textContent = String(clips);
+      $("k-duration").textContent = formatTime(duration);
+      $("k-disk").textContent = "—";
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function refreshDiskUsage(jobId) {
+    try {
+      const data = await (await fetch(`/api/jobs/${jobId}/usage`)).json();
+      $("k-disk").textContent = `${Math.round(data.disk_mb || 0)} Mo`;
+    } catch (err) { /* silencieux */ }
+  }
+
+  /* ================= Timeline ================= */
+  function renderTimeline(result) {
+    const timeline = $("timeline");
+    const track = $("tl-track");
+    const clips = (result && result.clips) || [];
+    if (clips.length < 1 || !result.duration) {
+      timeline.hidden = true;
+      return;
+    }
+    timeline.hidden = false;
+    track.innerHTML = "";
+    clips.forEach((clip) => {
+      const segment = document.createElement("div");
+      segment.className = "tl-seg";
+      const left = (clip.start / result.duration) * 100;
+      const width = Math.max(0.8, ((clip.end - clip.start) / result.duration) * 100);
+      segment.style.left = `${left}%`;
+      segment.style.width = `${width}%`;
+      segment.title = `#${clip.index} ${formatTime(clip.start)} → ${formatTime(clip.end)} · ${clip.title || ""}`;
+      segment.addEventListener("click", () => openDetail(clip, state.jobId));
+      track.appendChild(segment);
+    });
+  }
+
+  /* ================= Fiche extrait ================= */
+  function openDetail(clip, jobId) {
+    const drawer = $("detail");
+    const body = $("detail-body");
+    $("detail-title").textContent = `#${clip.index} — ${clip.title || "Extrait"}`;
+    const percent = Math.round((clip.score || 0) * 100);
+    body.innerHTML = `
+      <div class="detail-block">
+        <h4>Position</h4>
+        <p>${formatTime(clip.start)} → ${formatTime(clip.end)} · ${Math.round(clip.duration || 0)} s</p>
+      </div>
+      <div class="detail-block">
+        <h4>Score de pertinence — ${percent} %</h4>
+        <div class="score-bar"><i style="width:${percent}%"></i></div>
+      </div>
+      ${clip.hook ? `<div class="detail-block"><h4>Accroche TikTok</h4><p>🪝 ${escapeHtml(clip.hook)}</p></div>` : ""}
+      ${clip.reason ? `<div class="detail-block"><h4>Pourquoi cet extrait</h4><p>${escapeHtml(clip.reason)}</p></div>` : ""}
+      ${clip.tags && clip.tags.length ? `<div class="detail-block"><h4>Mots-clés</h4><p>${clip.tags.map((t) => escapeHtml(t)).join(" · ")}</p></div>` : ""}
+      <div class="detail-block">
+        <h4>Actions</h4>
+        <div class="actions" style="display:flex;gap:8px;">
+          ${clip.path ? `<a class="ghost" href="/api/jobs/${jobId}/clips/${clip.index}" download>Télécharger</a>` : ""}
+          <a class="ghost" href="/api/jobs/${jobId}/report" target="_blank" rel="noopener">Rapport</a>
+        </div>
+      </div>`;
+    drawer.hidden = false;
+  }
+
+  function closeDetail() { $("detail").hidden = true; }
+  document.querySelectorAll("[data-close-detail]").forEach((element) => {
+    element.addEventListener("click", closeDetail);
+  });
+
+  /* ================= Configuration persistée ================= */
+  async function loadConfig() {
+    try {
+      const config = await (await fetch("/api/config")).json();
+      $("cfg-model").value = config.model || "";
+      $("cfg-base-url").value = config.base_url || "";
+      $("cfg-whisper").value = config.whisper_model || "";
+      $("cfg-key").placeholder = config.has_key ? `${config.key_preview} (déjà enregistrée)` : "nvapi-…";
+    } catch (err) { console.error(err); }
+  }
+
+  $("btn-save-config").addEventListener("click", async () => {
+    const payload = {};
+    if ($("cfg-model").value.trim()) payload.CLIPAGENT_MODEL = $("cfg-model").value.trim();
+    if ($("cfg-base-url").value.trim()) payload.CLIPAGENT_BASE_URL = $("cfg-base-url").value.trim();
+    if ($("cfg-whisper").value.trim()) payload.CLIPAGENT_WHISPER_MODEL = $("cfg-whisper").value.trim();
+    if ($("cfg-key").value.trim()) payload.OPENAI_API_KEY = $("cfg-key").value.trim();
+    try {
+      const res = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`Erreur ${res.status}`);
+      toast("Configuration enregistrée", "Appliquée aux prochaines tâches.", "ok");
+      $("cfg-key").value = "";
+      loadConfig();
+    } catch (err) {
+      toast("Enregistrement impossible", String(err.message || err), "error");
+    }
+  });
+
+  /* ================= Démarrage rapide ================= */
+  document.querySelectorAll("[data-quick]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.quick;
+      document.querySelector(`#source-tabs button[data-mode="${mode}"]`).click();
+      const field = mode === "url" ? $("field-url") : mode === "file" ? $("field-file") : $("field-transcript");
+      field.scrollIntoView({ behavior: "smooth", block: "center" });
+      const input = mode === "url" ? $("input-url") : mode === "file" ? $("drop-file") : $("drop-transcript");
+      if (input) setTimeout(() => input.focus(), 350);
+    });
+  });
 
   /* ================= Réglages avancés ================= */
   async function loadOptions() {
@@ -706,8 +860,11 @@
   loadHealth();
   loadStyles();
   loadOptions();
+  loadConfig();
   loadHistory();
+  loadDashboard();
   setInterval(loadHealth, 30000);
+  setInterval(loadDashboard, 60000);
 
   // Hook d'automatisation (tests e2e, pilotage depuis la console).
   window.clipagent = { start, watch, openJob, renderResults, loadHistory, toast };

@@ -206,6 +206,33 @@
                 <label class="check"><input type="checkbox" id="opt-words" /> Timestamps par mot</label>
                 <label class="check"><input type="checkbox" id="opt-enhance" checked /> Ajustement couleur</label>
               </div>
+
+              <div class="config-block">
+                <div class="config-head">
+                  <span>Configuration enregistrée (.env)</span>
+                  <button class="ghost" id="btn-save-config">💾 Enregistrer</button>
+                </div>
+                <div class="grid2">
+                  <label class="field">
+                    <span>Modèle par défaut</span>
+                    <input type="text" id="cfg-model" placeholder="nvidia/nemotron-3-ultra-550b-a55b" />
+                  </label>
+                  <label class="field">
+                    <span>Endpoint</span>
+                    <input type="text" id="cfg-base-url" placeholder="https://integrate.api.nvidia.com/v1" />
+                  </label>
+                </div>
+                <div class="grid2">
+                  <label class="field">
+                    <span>Clé API</span>
+                    <input type="password" id="cfg-key" placeholder="laisser vide pour conserver" />
+                  </label>
+                  <label class="field">
+                    <span>Modèle Whisper</span>
+                    <input type="text" id="cfg-whisper" placeholder="base" />
+                  </label>
+                </div>
+              </div>
             </div>
           </details>
         </div>
@@ -214,6 +241,14 @@
 
     <!-- ============ Colonne de travail ============ -->
     <section style="display: flex; flex-direction: column; gap: 22px;">
+      <!-- Tableau de bord -->
+      <div class="kpis" id="kpis">
+        <div class="kpi"><b id="k-tasks">0</b><span>tâches</span></div>
+        <div class="kpi"><b id="k-clips">0</b><span>extraits</span></div>
+        <div class="kpi"><b id="k-duration">0 s</b><span>duration totale</span></div>
+        <div class="kpi"><b id="k-disk">0 Mo</b><span>sur disque</span></div>
+      </div>
+
       <!-- Suivi -->
       <div class="card">
         <div class="card-head">
@@ -238,6 +273,8 @@
             <summary>Journal d'exécution</summary>
             <pre id="logs">—</pre>
           </details>
+
+          <div class="timings" id="timings" hidden></div>
         </div>
       </div>
 
@@ -255,8 +292,20 @@
           <p class="edit-hint" id="edit-hint" hidden>
             ✎ Cliquez sur un titre ou un accroche pour le modifier, puis validez.
           </p>
+          <div class="timeline" id="timeline" hidden>
+            <div class="tl-track" id="tl-track"></div>
+            <div class="tl-legend"><span>position des extraits dans la source</span></div>
+          </div>
           <div class="results" id="results">
-            <div class="empty">Les extraits apparaîtront ici, avec aperçu vidéo et téléchargement direct.</div>
+            <div class="empty" id="empty-state">
+              <b>Aucun extrait pour l'instant</b>
+              <p>Collez l'URL d'un live Kick, déposez une vidéo, ou partez d'une transcription.</p>
+              <div class="quick">
+                <button class="ghost" data-quick="url">🌐 Analyser une VOD</button>
+                <button class="ghost" data-quick="file">🎬 Depuis une vidéo</button>
+                <button class="ghost" data-quick="transcript">📝 Depuis une transcription</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -278,6 +327,18 @@
     clipagent · OpenAI Agents SDK · Whisper local · FFmpeg ·
     <kbd>Ctrl</kbd>+<kbd>Entrée</kbd> pour lancer
   </footer>
+
+  <!-- Fiche extrait -->
+  <div class="drawer" id="detail" hidden>
+    <div class="modal-backdrop" data-close-detail></div>
+    <aside class="drawer-card">
+      <div class="modal-head">
+        <h3 id="detail-title">Extrait</h3>
+        <button class="icon-btn" data-close-detail aria-label="Fermer">✕</button>
+      </div>
+      <div id="detail-body" class="drawer-body"></div>
+    </aside>
+  </div>
 
   <div class="toasts" id="toasts"></div>
 

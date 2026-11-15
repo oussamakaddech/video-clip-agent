@@ -6,6 +6,7 @@ l'interface web puisse suivre l'avancement en direct.
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 import uuid
@@ -107,16 +108,32 @@ def transcribe_media(
     language: str | None = None,
     output: str | Path | None = None,
     on_progress: Progress = _noop,
+    use_cache: bool = True,
 ) -> Path:
-    """Transcrit un média et écrit le SRT."""
+    """Transcrit un média et écrit le SRT (avec cache par empreinte du fichier)."""
     from .browser_pipeline import transcribe_media as _transcribe
+
+    target = Path(output or Path(video).with_suffix(".srt"))
+    cache_key = media_fingerprint(video)
+    cache_path = transcript_cache_path(cache_key)
+
+    if use_cache and cache_path.exists() and cache_path.stat().st_size > 0:
+        on_progress("Transcription réutilisée (cache)", 0.9)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(cache_path, target)
+        return target
 
     on_progress("Transcription en cours…", 0.1)
     segments = _transcribe(video, model_name=model, language=language)
     transcript = Transcript(segments=segments, source=str(video))
-    target = Path(output or Path(video).with_suffix(".srt"))
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(transcript.to_srt(), encoding="utf-8")
+    if use_cache:
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(target, cache_path)
+        except OSError:
+            pass
     on_progress(f"Transcription terminée ({len(segments)} segments)", 1.0)
     return target
 
@@ -140,11 +157,37 @@ def validate_request(request: ClipRequest) -> list[str]:
     return problems
 
 
+def media_fingerprint(media: str | Path) -> str:
+    """Empreinte stable d'un média (taille + début + fin du fichier)."""
+    import hashlib
+
+    path = Path(media)
+    try:
+        stat = path.stat()
+    except OSError:
+        return "absent"
+    digest = hashlib.sha1()
+    digest.update(str(stat.st_size).encode())
+    with path.open("rb") as handle:
+        digest.update(handle.read(262_144))
+        if stat.st_size > 524_288:
+            handle.seek(-262_144, 2)
+            digest.update(handle.read())
+    return digest.hexdigest()[:16]
+
+
+def transcript_cache_path(key: str) -> Path:
+    """Chemin du fichier SRT mis en cache pour une empreinte donnée."""
+    base = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".cache")) / "clipagent" / "transcripts"
+    return base / f"{key}.srt"
+
+
 def analyze(
     request: ClipRequest,
     *,
     output_dir: str | Path | None = None,
     on_progress: Progress = _noop,
+    timings: dict | None = None,
 ) -> ClipResult:
     """Analyse une source (URL ou fichier) et produit le plan de clipping."""
     started = time.time()
@@ -152,6 +195,7 @@ def analyze(
     if problems:
         raise ValueError(" ; ".join(problems))
 
+    timings = timings if timings is not None else {}
     settings = request.settings()
     out_dir = Path(output_dir) if output_dir else unique_output_dir("output")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -163,19 +207,25 @@ def analyze(
         on_progress("Téléchargement de la VOD…", 0.05)
         from .download import download
 
+        phase = time.time()
         video = str(download(request.url, settings=settings, out_dir=settings.download_dir))
+        timings["téléchargement"] = time.time() - phase
 
     if not transcript_path:
         if not video:
             raise ValueError("Fournissez une URL de VOD, un fichier vidéo ou une transcription.")
         on_progress("Transcription de la vidéo…", 0.15)
+        phase = time.time()
         transcript_path = str(
             transcribe_media(video, model=request.whisper_model, language=request.language, on_progress=on_progress)
         )
+        timings["transcription"] = time.time() - phase
 
     on_progress("Analyse et sélection des extraits…", 0.5)
+    phase = time.time()
     transcript = load_transcript(transcript_path)
     plan = plan_clips(video, transcript, settings, instruction=request.instruction)
+    timings["analyse"] = time.time() - phase
     report_json, report_md = save_report(plan, out_dir)
     on_progress(f"{len(plan.clips)} extrait(s) sélectionné(s)", 0.7)
     return ClipResult(
@@ -194,9 +244,11 @@ def render(
     *,
     output_dir: str | Path | None = None,
     on_progress: Progress = _noop,
+    timings: dict | None = None,
 ) -> ClipResult:
     """Rend les extraits d'un plan (source locale ou fragments déjà capturés)."""
     started = time.time()
+    timings = timings if timings is not None else {}
     settings = request.settings()
     out_dir = Path(output_dir or "output")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -211,6 +263,7 @@ def render(
         style = replace(style, facecam_enabled=request.facecam)
 
     on_progress("Rendu des extraits…", 0.2)
+    phase = time.time()
     if request.video_path:
         plan = render_plan(plan, request.video_path, settings, transcript=transcript, output_dir=out_dir, style=style)
     else:
@@ -227,6 +280,7 @@ def render(
             whisper_model=request.whisper_model,
         )
     report_json, report_md = save_report(plan, out_dir)
+    timings["rendu"] = time.time() - phase
     on_progress(f"{len([c for c in plan.clips if c.path])} extrait(s) rendu(s)", 1.0)
     return ClipResult(
         plan=plan,

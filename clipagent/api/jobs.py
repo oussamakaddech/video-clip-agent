@@ -30,6 +30,7 @@ class Job:
     progress: float = 0.0
     message: str = "En attente…"
     logs: list[str] = field(default_factory=list)
+    timings: dict = field(default_factory=dict)   # durée de chaque phase (secondes)
     created_at: str = field(default_factory=_now)
     started_at: str | None = None
     finished_at: str | None = None
@@ -45,6 +46,7 @@ class Job:
             "progress": round(self.progress, 3),
             "message": self.message,
             "logs": self.logs[-60:],
+            "timings": {k: round(v, 2) for k, v in self.timings.items()},
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -88,6 +90,7 @@ class JobManager:
                 "progress": job.progress,
                 "message": job.message,
                 "logs": job.logs[-200:],
+                "timings": job.timings,
                 "created_at": job.created_at,
                 "started_at": job.started_at,
                 "finished_at": job.finished_at,
@@ -120,6 +123,7 @@ class JobManager:
                 progress=float(data.get("progress", 0.0) or 0.0),
                 message=data.get("message", ""),
                 logs=list(data.get("logs") or []),
+                timings=dict(data.get("timings") or {}),
                 created_at=data.get("created_at", _now()),
                 started_at=data.get("started_at"),
                 finished_at=data.get("finished_at"),
@@ -227,10 +231,19 @@ class JobManager:
             with self._slots:            # concurrence bornée
                 if job.cancelled:
                     raise JobCancelled()
-                result = analyze(job.request, output_dir=out_dir, on_progress=progress)
+                result = analyze(
+                    job.request, output_dir=out_dir, on_progress=progress,
+                    timings=job.timings,
+                )
                 job.plan = result.plan  # type: ignore[attr-defined]
                 if render:
-                    result = render_clips(job.request, result.plan, output_dir=out_dir, on_progress=progress)
+                    result = render_clips(
+                        job.request, result.plan, output_dir=out_dir,
+                        on_progress=progress, timings=job.timings,
+                    )
+                job.timings["total"] = sum(
+                    value for key, value in job.timings.items() if key != "total"
+                )
             job.result = result.to_dict()
             job.status = "done"
             job.progress = 1.0

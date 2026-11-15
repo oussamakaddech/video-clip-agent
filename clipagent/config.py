@@ -111,7 +111,7 @@ class Settings:
     # --- Encodage ffmpeg ---------------------------------------------------
     encoder: str = "libx264"      # libx264 | libx265 | libvpx-vp9
     crf: int = 18
-    preset: str = "slow"
+    preset: str = "medium"         # medium ≈ 3× plus rapide que slow (différence visuelle minime)
     fps: int = 30
     audio_bitrate: str = "192k"
     sharpen: float = 0.6

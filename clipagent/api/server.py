@@ -31,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
 from ..config import Settings
+from ..config_api import current_config, update_config
 from ..pipeline import save_report
 from ..service import (
     ClipRequest,
@@ -205,6 +206,21 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
         if job.status not in {"running", "queued"}:
             manager.delete(job_id)
         return {"ok": True}
+
+    @app.get("/api/config")
+    def get_config() -> dict:
+        """Configuration effective (clé masquée) et liste des clés modifiables."""
+        return current_config()
+
+    @app.post("/api/config")
+    def set_config(payload: dict) -> dict:
+        """Modifie la configuration persistée (.env)."""
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="Objet JSON attendu")
+        try:
+            return update_config(payload)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.get("/api/models")
     def models(provider: str | None = None) -> dict:
