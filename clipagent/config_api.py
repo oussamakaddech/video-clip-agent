@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +78,6 @@ def current_config() -> dict[str, Any]:
     """Configuration effective (le .env l'emporte sur les valeurs par défaut)."""
     from .config import Settings
 
-    values = read_env()
     settings = Settings.from_env()
     return {
         "model": settings.model,
