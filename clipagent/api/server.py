@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
+import subprocess
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -322,11 +325,78 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
         job = _job_or_404(manager, job_id)
         if not job.output_dir:
             raise HTTPException(status_code=404, detail="Tâche sans dossier")
-        target = (Path(job.output_dir) / path).resolve()
         root = Path(job.output_dir).resolve()
-        if not str(target).startswith(str(root)) or not target.exists():
+        raw = Path(path)
+        candidates = []
+        if raw.is_absolute():
+            candidates.append(raw.resolve())
+        else:
+            candidates.append((root / raw).resolve())
+            candidates.append((Path.cwd() / raw).resolve())
+        target = next((c for c in candidates if c.exists()), None)
+        if target is None or not str(target).startswith(str(root)):
             raise HTTPException(status_code=404, detail="Fichier indisponible")
         return FileResponse(target, media_type="video/mp4", filename=target.name)
+
+    @app.get("/api/jobs/{job_id}/zip")
+    def download_zip(job_id: str) -> StreamingResponse:
+        """Télécharge tous les extraits + le rapport dans une seule archive."""
+        job = _job_or_404(manager, job_id)
+        if not job.output_dir:
+            raise HTTPException(status_code=404, detail="Tâche sans dossier")
+        files = [
+            Path(c.path)
+            for c in job.plan.clips  # type: ignore[attr-defined]
+            if c.path and Path(c.path).exists()
+        ]
+        if not files:
+            raise HTTPException(status_code=404, detail="Aucun extrait à empaqueter")
+        archive = Path(job.output_dir) / "clips.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for file in files:
+                bundle.write(file, arcname=file.name)
+            report = Path(job.output_dir) / "clips_plan.md"
+            if report.exists():
+                bundle.write(report, arcname="clips_plan.md")
+        return FileResponse(
+            archive,
+            media_type="application/zip",
+            filename=f"{Path(job.output_dir).name}.zip",
+        )
+
+    @app.post("/api/jobs/{job_id}/reveal")
+    def reveal(job_id: str) -> dict:
+        """Ouvre le dossier de sortie dans l'explorateur (Windows)."""
+        job = _job_or_404(manager, job_id)
+        if not job.output_dir:
+            raise HTTPException(status_code=404, detail="Tâche sans dossier")
+        folder = Path(job.output_dir).resolve()
+        if not folder.exists():
+            raise HTTPException(status_code=404, detail="Dossier absent")
+        try:
+            if os.name == "nt":
+                os.startfile(str(folder))  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", str(folder)])
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"ok": True, "path": str(folder)}
+
+    @app.get("/api/jobs/{job_id}/files")
+    def job_files(job_id: str) -> dict:
+        """Tailles des fichiers produits (affichées dans l'interface)."""
+        job = _job_or_404(manager, job_id)
+        files = []
+        for clip in job.plan.clips:  # type: ignore[attr-defined]
+            path = Path(clip.path) if clip.path else None
+            files.append(
+                {
+                    "index": clip.index,
+                    "size": path.stat().st_size if path and path.exists() else 0,
+                    "exists": bool(path and path.exists()),
+                }
+            )
+        return {"files": files, "output_dir": str(job.output_dir) if job.output_dir else None}
 
     @app.patch("/api/jobs/{job_id}/style")
     def set_style(job_id: str, payload: dict) -> dict:

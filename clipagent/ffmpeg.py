@@ -357,6 +357,21 @@ def build_enhance_filter(
     )
 
 
+def _double_rate(rate: str) -> str:
+    """Double un débit exprimé en bits/s ('8M' -> '16777216')."""
+    text = str(rate).strip().upper()
+    units = {"K": 1024, "M": 1024 * 1024, "G": 1024 * 1024 * 1024}
+    if text and text[-1] in units:
+        try:
+            return str(int(float(text[:-1]) * units[text[-1]]) * 2)
+        except ValueError:
+            return text
+    try:
+        return str(int(float(text)) * 2)
+    except ValueError:
+        return text
+
+
 def build_cut_command(
     ffmpeg: str,
     video: str | Path,
@@ -388,6 +403,7 @@ def build_cut_command(
     encoder: str = "libx264",
     preset: str = "slow",
     audio_bitrate: str = "192k",
+    max_rate: str = "8M",
 ) -> list[str]:
     """Commande de découpe d'un extrait (recodage + recadrage + sous-titres)."""
     command = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -485,6 +501,11 @@ def build_cut_command(
         video_args = ["-c:v", "libvpx-vp9", "-crf", str(crf), "-b:v", "0", "-row-mt", "1"]
     else:
         video_args = ["-c:v", "libx264", "-preset", preset, "-crf", str(crf)]
+
+    # Plafond de débit : sur un contenu très « grainy » (coucher de soleil, feu
+    # d'artifice…), CRF 18 seul produit des fichiers énormes. Le plafond évite
+    # ça sans différence visuelle à l'écran.
+    video_args += ["-maxrate", str(max_rate), "-bufsize", str(_double_rate(max_rate))]
 
     command += video_args + [
         "-profile:v", "high",

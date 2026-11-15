@@ -332,7 +332,7 @@
         <div class="thumb">
           ${hasFile ? `<video controls preload="metadata" playsinline src="${source}"></video>` : ""}
           <span class="badge-top">#${clip.index}</span>
-          <span class="dur">${Math.round(clip.duration)} s</span>
+          <span class="dur" data-size="${clip.index}">${Math.round(clip.duration)} s</span>
         </div>
         <div class="meta">
           <div class="title" contenteditable="true" data-field="title" data-index="${clip.index}"
@@ -351,6 +351,21 @@
         </div>`;
       box.appendChild(card);
     });
+
+    // Taille réelle de chaque fichier (affichée sur la pastille).
+    fetch(`/api/jobs/${jobId}/files`)
+      .then((r) => r.json())
+      .then((data) => {
+        (data.files || []).forEach((file) => {
+          if (!file.exists) return;
+          const badge = box.querySelector(`[data-size="${file.index}"]`);
+          if (badge) {
+            badge.textContent = `${Math.round((file.size || 0) / 1048576)} Mo`;
+            badge.title = "Poids du fichier";
+          }
+        });
+      })
+      .catch(() => {});
 
     // Édition inline : sauvegarde vers l'API
     box.querySelectorAll("[data-save]").forEach((button) => {
@@ -388,28 +403,37 @@
     best.className = "best";
     best.innerHTML = `
       <div>
-        <b>Best-of — tous les extraits</b>
-        <span>${result.clips.length} clips concaténés en une seule vidéo</span>
+        <b>Tous les extraits</b>
+        <span>${result.clips.length} clip(s) · ZIP avec le rapport</span>
       </div>
       <div class="actions">
-        <a class="ghost" href="/api/jobs/${jobId}/report" target="_blank" rel="noopener">Rapport</a>
-        <a class="ghost" href="/api/jobs/${jobId}/best-of" download>Télécharger</a>
+        <a class="ghost" href="/api/jobs/${jobId}/zip" download>📦 ZIP</a>
+        <a class="ghost" href="/api/jobs/${jobId}/best-of" download>🎞 Best-of</a>
+        <button class="ghost" id="btn-reveal">📁 Dossier</button>
       </div>`;
     box.appendChild(best);
+    const reveal = best.querySelector("#btn-reveal");
+    if (reveal) {
+      reveal.addEventListener("click", async () => {
+        try {
+          const res = await fetch(`/api/jobs/${jobId}/reveal`, { method: "POST" });
+          if (!res.ok) throw new Error("Dossier indisponible");
+          toast("Dossier ouvert", "Les fichiers sont dans le dossier de la tâche.", "ok");
+        } catch (err) {
+          toast("Ouverture impossible", String(err.message || err), "error");
+        }
+      });
+    }
 
     $("btn-copy-report").hidden = false;
     $("btn-download-all").hidden = false;
     $("btn-download-all").onclick = () => {
-      result.clips.forEach((clip, index) => {
-        setTimeout(() => {
-          const link = document.createElement("a");
-          link.href = `/api/jobs/${jobId}/clips/${clip.index}`;
-          link.download = "";
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-        }, index * 350);
-      });
+      const link = document.createElement("a");
+      link.href = `/api/jobs/${jobId}/zip`;
+      link.download = "";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     };
   }
 
