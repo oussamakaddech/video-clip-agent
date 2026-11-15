@@ -405,6 +405,51 @@
     }
   });
 
+  /* ================= Sélection automatique du modèle ================= */
+  $("btn-pick-model").addEventListener("click", async () => {
+    const button = $("btn-pick-model");
+    const rank = $("model-rank");
+    const provider = $("opt-provider").value;
+    button.disabled = true;
+    button.textContent = "🔎 Recherche en cours… (sonde des modèles)";
+    rank.hidden = false;
+    rank.innerHTML = '<div class="skeleton" style="height:30px"></div>';
+
+    try {
+      const res = await fetch(`/api/models/best?provider=${encodeURIComponent(provider)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `Erreur ${res.status}`);
+
+      rank.innerHTML = "";
+      (data.results || []).forEach((item, index) => {
+        const buttonRow = document.createElement("button");
+        buttonRow.innerHTML = `
+          <span class="${item.ok ? "" : "ko"}">${item.ok ? "✓" : "✕"}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.model)}</span>
+          <span class="score">${item.ok ? `${item.score.toFixed(2)} · ${item.latency.toFixed(1)}s` : "indispo"}</span>`;
+        if (index === 0 && item.ok) buttonRow.classList.add("best");
+        buttonRow.addEventListener("click", () => {
+          $("opt-model").value = item.model;
+          toast("Modèle retenu", item.model, "ok");
+        });
+        rank.appendChild(buttonRow);
+      });
+
+      if (data.best) {
+        $("opt-model").value = data.best;
+        toast("Meilleur modèle trouvé", `${data.best}${data.cached ? " (cache)" : ""}`, "ok");
+      } else {
+        toast("Aucun modèle validé", "Le mode heuristique sera utilisé.", "error");
+      }
+    } catch (err) {
+      rank.innerHTML = "";
+      toast("Recherche impossible", String(err.message || err), "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "🔎 Trouver le meilleur modèle";
+    }
+  });
+
   /* ================= Comparateur de styles ================= */
   const COMPARE_STYLES = ["streamer", "tiktok", "hype", "reels"];
 

@@ -155,6 +155,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="URL de la VOD : les clips non couverts par un fragment sont capturés à la demande",
     )
 
+    p_pick = sub.add_parser(
+        "pick-model",
+        help="Chercher automatiquement le modèle d'IA le plus adapté au clipping",
+    )
+    p_pick.add_argument("--provider", help="Fournisseur (nvidia, openai, ollama, together, groq)")
+    p_pick.add_argument("--model", help="Forcer un modèle (sinon : sélection automatique)")
+    p_pick.add_argument("--limit", type=int, default=6, help="Nombre de modèles à sonder")
+    p_pick.add_argument("--no-cache", action="store_true", help="Ignorer le classement en cache")
+    p_pick.add_argument("--set-default", action="store_true", help="Écrire le gagnant dans .env")
+
     return parser
 
 

@@ -80,9 +80,13 @@ def test_api_rejects_missing_file(client):
     assert response.status_code == 422
 
 
-def test_provider_endpoint(client):
+def test_provider_endpoint(client, monkeypatch):
+    # Sans clé : le endpoint ne doit pas lancer d'appel réseau.
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("CLIPAGENT_API_KEY", "")
     response = client.get("/api/provider")
     assert response.status_code == 200
     data = response.json()
     assert "model" in data
     assert "reachable" in data
+    assert data["reachable"] is False

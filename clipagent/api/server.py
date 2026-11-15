@@ -214,6 +214,18 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
         listing = list_models(settings)
         return {"models": listing, "providers": available_providers(), "current": settings.model}
 
+    @app.get("/api/models/best")
+    def best_model(provider: str | None = None, refresh: bool = False) -> dict:
+        """Recherche automatique du meilleur modèle pour le clipping (sonde + classement)."""
+        from ..model_picker import select_best_model
+
+        settings = Settings.from_env()
+        if provider:
+            settings.provider = provider
+            settings.provider_base_url = None
+            settings.base_url = PROVIDERS.get(provider, {}).get("base_url")
+        return select_best_model(settings, use_cache=not refresh)
+
     @app.get("/api/options")
     def options() -> dict:
         """Catalogue des réglages avancés (IA, Whisper, OpenCV, ffmpeg, encodage)."""

@@ -145,6 +145,21 @@ body {
 }
 .clip .edit-row button:hover { color: #fff; border-color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, var(--surface-3)); }
 
+/* ================= Classement des modèles ================= */
+.rank { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.rank button {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; text-align: left;
+  padding: 7px 9px; border-radius: var(--r-sm);
+  border: 1px solid var(--line-soft); background: var(--surface-3);
+  color: var(--text-2); font-size: 11.5px; cursor: pointer;
+  font-family: inherit; transition: var(--fast);
+}
+.rank button:hover { border-color: var(--accent-2); color: var(--text); }
+.rank button.best { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); color: var(--text); }
+.rank .score { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+.rank .ko { color: var(--danger); }
+
 /* ================= Comparateur ================= */
 .modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; }
 .modal[hidden] { display: none; }

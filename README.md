@@ -215,7 +215,31 @@ Options principales :
 | `podcast` | 6 | 30–120 s | extraits plus longs |
 | `livestream` | 12 | 25–90 s | VOD de live (beaucoup de pics) |
 
-## 2c. Comparateur de styles, édition et réglages avancés
+### Sélection automatique du modèle d'IA
+
+Plutôt que de nommer un modèle à la main, le projet **cherche et classe** lui-même
+les modèles disponibles sur le endpoint :
+
+```bash
+clipagent pick-model --provider nvidia --limit 6          # sonde + classement
+clipagent pick-model --provider nvidia --set-default      # écrit le gagnant dans .env
+```
+
+Le principe : on interroge `/models` du fournisseur, on écarte ce qui ne sait pas
+utiliser d'outils (embeddings, garde-fous, parseurs, modèles de vision), puis on
+**sonde** chaque candidat sur une vraie micro-tâche de clipping (appel
+`propose_clip`) en notant succès, qualité des bornes/titre/hook et latence.
+
+> Les modèles « raisonneurs » (Nemotron) consomment beaucoup de tokens avant
+> d'appeler un outil : la sonde désactive la réflexion (`enable_thinking: false`)
+> et alloue 1024 tokens, sinon le modèle est faussement éliminé.
+
+Le classement est **mis en cache 24 h** (`%LOCALAPPDATA%\clipagent\model_bench.json`).
+
+Côté interface : bouton **« 🔎 Trouver le meilleur modèle »** dans les réglages
+avancés, qui affiche le classement (score, latence) et permet de retenir un modèle.
+
+## 2d. Comparateur de styles, édition et réglages avancés
 
 ### Comparateur de styles
 

@@ -16,6 +16,7 @@ from .ffmpeg import FFmpegError, probe, resolve_ffmpeg
 from .hooks import is_rtl_language
 from .models import Clip, Segment
 from .pipeline import Plan, plan_clips, render_plan, save_report
+from .service import PROVIDERS
 from .styles import style_for_language
 from .transcript import Transcript, load_transcript
 
@@ -422,6 +423,62 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pick_model(args: argparse.Namespace) -> int:
+    """Cherche automatiquement le modèle d'IA le plus adapté au clipping."""
+    from .model_picker import select_best_model
+
+    settings = settings_from_args(args)
+    if args.provider:
+        settings.provider = args.provider
+        settings.provider_base_url = None
+        settings.base_url = PROVIDERS.get(args.provider, {}).get("base_url")
+    if args.model:
+        settings.model = args.model
+
+    def progress(message: str, ratio: float = 0.0) -> None:
+        print(f"  [{ratio:5.0%}] {message}", flush=True)
+
+    print(f"Recherche du meilleur modèle sur {settings.provider or 'openai'}…")
+    result = select_best_model(
+        settings,
+        limit=args.limit,
+        use_cache=not args.no_cache,
+        on_progress=progress,
+    )
+
+    print(f"\nClassement ({'cache' if result['cached'] else 'sonde live'}) :")
+    for item in result["results"]:
+        status = "OK " if item["ok"] else "KO "
+        print(
+            f"  {status} {item['model']:<52} score {item['score']:.2f} "
+            f"latence {item['latency']:.1f}s"
+            + (f"  ({item['error']})" if item.get("error") else "")
+        )
+    best = result.get("best")
+    print(f"\nMeilleur modèle : {best or 'aucun (mode heuristique)'}")
+    if best and args.set_default:
+        _write_default_model(best)
+        print(f"Écrit dans .env : CLIPAGENT_MODEL={best}")
+    return 0
+
+
+def _write_default_model(model: str) -> None:
+    """Enregistre le modèle choisi dans le fichier .env du projet."""
+    from pathlib import Path
+
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    replaced = False
+    for index, line in enumerate(lines):
+        if line.startswith("CLIPAGENT_MODEL="):
+            lines[index] = f"CLIPAGENT_MODEL={model}"
+            replaced = True
+            break
+    if not replaced:
+        lines.append(f"CLIPAGENT_MODEL={model}")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 COMMANDS = {
     "plan": cmd_plan,
     "render": cmd_render,
@@ -432,4 +489,5 @@ COMMANDS = {
     "fetch": cmd_fetch,
     "browse": cmd_browse,
     "finalize": cmd_finalize,
+    "pick-model": cmd_pick_model,
 }
