@@ -10,7 +10,7 @@ from typing import Any
 from .config import Settings
 from .ffmpeg import FFmpegError, concat_clips, probe, render_clip, render_thumbnail
 from .hooks import resolve_hook
-from .models import Clip
+from .models import Clip, ClipProposal
 from .selection import heuristic_proposals, validate_proposals
 from .styles import ClipStyle, get_style
 from .transcript import Transcript, format_timestamp, load_transcript
@@ -168,6 +168,39 @@ def plan_clips(
         limit=settings.num_clips,
         segments=list(transcript.segments),
     )
+
+    if not plan.clips and not transcript.segments and video:
+        # Vidéo sans parole : on sélectionne les moments les plus mouvementés.
+        from .motion import motion_windows
+
+        windows = motion_windows(
+            video,
+            count=settings.num_clips,
+            window=max(settings.max_clip_seconds, 30.0),
+            duration=media_duration or None,
+        )
+        if windows:
+            plan.warnings.append(
+                "Aucune parole détectée : les extraits sont sélectionnés sur le mouvement de l'image."
+            )
+            plan.mode = "visuel"
+            plan.clips = validate_proposals(
+                [
+                    ClipProposal(
+                        start=start,
+                        end=end,
+                        title=f"Moment {index}",
+                        reason="Sélection visuelle (mouvement de l'image).",
+                        score=round(min(1.0, score * 4), 3),
+                        hook="Le plus beau moment de la vidéo",
+                    )
+                    for index, (start, end, score) in enumerate(windows, start=1)
+                ],
+                duration=media_duration or None,
+                min_length=settings.min_clip_seconds,
+                max_length=settings.max_clip_seconds,
+                limit=settings.num_clips,
+            )
     if not plan.clips:
         plan.warnings.append("Aucun extrait valide après validation.")
     return plan

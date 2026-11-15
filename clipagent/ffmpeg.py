@@ -54,7 +54,10 @@ def resolve_ffprobe(explicit: str | None = None) -> str | None:
 def run(command: list[str], *, timeout: int = 3600) -> subprocess.CompletedProcess:
     """Exécute une commande et lève une erreur lisible en cas d'échec."""
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(
+        command, capture_output=True, text=True, timeout=timeout,
+        encoding="utf-8", errors="replace",
+    )
     except subprocess.TimeoutExpired as exc:
         raise FFmpegError(f"Commande expirée : {' '.join(command[:3])}…") from exc
     if result.returncode != 0:
@@ -112,7 +115,10 @@ def probe(video: str | Path, *, ffprobe_binary: str | None = None) -> MediaInfo:
 
     # Repli : ffmpeg -i et lecture de "Duration" sur stderr.
     ffmpeg = resolve_ffmpeg()
-    result = subprocess.run([ffmpeg, "-i", str(video)], capture_output=True, text=True)
+    result = subprocess.run(
+        [ffmpeg, "-i", str(video)], capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
     text = result.stderr or ""
     info = MediaInfo()
     for line in text.splitlines():

@@ -238,7 +238,10 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
             ffmpeg_path = resolve_ffmpeg(settings.ffmpeg_binary)
             import subprocess
 
-            out = subprocess.run([ffmpeg_path, "-version"], capture_output=True, text=True).stdout
+            out = subprocess.run(
+                [ffmpeg_path, "-version"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+            ).stdout
             ffmpeg_version = out.splitlines()[0] if out else None
         except Exception:  # noqa: BLE001
             pass

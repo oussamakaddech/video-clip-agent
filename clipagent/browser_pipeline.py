@@ -24,7 +24,7 @@ from .chat import build_chat_context, extract_chat
 from .config import Settings
 from .ffmpeg import FFmpegError, concat_clips, render_clip
 from .hooks import resolve_hook
-from .models import Clip, Segment
+from .models import Clip, ClipProposal, Segment
 from .pipeline import Plan, write_clip_ass
 from .selection import validate_proposals
 from .styles import ClipStyle, get_style
@@ -210,9 +210,10 @@ def analyze_in_browser(
         )
         print(f"  transcript candidat : {candidates_path}", flush=True)
         if not transcript.segments:
-            plan.warnings.append("Aucune transcription obtenue : aucun extrait ne peut être proposé.")
-            plan.mode = "browser"
-            return plan
+            plan.warnings.append(
+                "Aucune parole détectée dans la vidéo (ambiance, musique ou piste muette) : "
+                "les extraits sont sélectionnés sur le mouvement de l'image."
+            )
 
         # --- Étape 4 : sélection par l'agent -------------------------------
         # Le chat replay donne à l'IA le contexte sémantique de chaque fenêtre
@@ -227,21 +228,37 @@ def analyze_in_browser(
             ).strip()
 
         proposals = []
-        try:
-            from .llm import run_agent_chunked
+        if not transcript.segments:
+            # Vidéo sans parole (ambiance, musique, plan fixe) : on retient les
+            # fenêtres les plus mouvementées du storyboard.
+            proposals = [
+                ClipProposal(
+                    start=candidate.start,
+                    end=candidate.end,
+                    title=f"Moment {index}",
+                    reason="Sélection visuelle : la vidéo ne contient pas de parole.",
+                    score=round(candidate.score, 3),
+                    hook="Le plus beau moment de la vidéo",
+                )
+                for index, candidate in enumerate(candidates, start=1)
+            ]
+            plan.mode = "browser·visuel"
+        else:
+            try:
+                from .llm import run_agent_chunked
 
-            proposals, chunks = run_agent_chunked(
-                transcript,
-                settings,
-                duration=duration,
-                extra_instruction=instruction,
-                max_chunks=settings.max_chunks,
-            )
-            plan.chunks = chunks
-            plan.mode = "browser+llm"
-        except Exception as exc:  # noqa: BLE001
-            plan.warnings.append(f"Agent indisponible ({exc}) : sélection par mouvement seule.")
-            plan.mode = "browser"
+                proposals, chunks = run_agent_chunked(
+                    transcript,
+                    settings,
+                    duration=duration,
+                    extra_instruction=instruction,
+                    max_chunks=settings.max_chunks,
+                )
+                plan.chunks = chunks
+                plan.mode = "browser+llm"
+            except Exception as exc:  # noqa: BLE001
+                plan.warnings.append(f"Agent indisponible ({exc}) : sélection par mouvement seule.")
+                plan.mode = "browser"
 
         if not proposals:
             from .selection import heuristic_proposals

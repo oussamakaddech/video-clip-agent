@@ -668,7 +668,18 @@ details.logs pre {
 .empty {
   padding: 34px 20px; text-align: center;
   border: 1px dashed var(--line); border-radius: var(--r-lg);
-  color: var(--muted); font-size: 13px;
+  color: var(--muted); font-size: 13px; line-height: 1.7;
+}
+
+.banner {
+  grid-column: 1 / -1;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface-2));
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
 /* ================= Historique ================= */

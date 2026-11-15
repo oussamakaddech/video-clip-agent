@@ -238,7 +238,8 @@ def _probe_duration(video: Path) -> float:
     try:
         ffmpeg = resolve_ffmpeg()
         result = subprocess.run(
-            [ffmpeg, "-i", str(video)], capture_output=True, text=True
+            [ffmpeg, "-i", str(video)], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
         )
         for line in (result.stderr or "").splitlines():
             if "Duration:" in line:
@@ -270,6 +271,7 @@ def _extract_frame(video: Path, timestamp: float, target: Path) -> bool:
             ],
             capture_output=True,
             check=True,
+            encoding="utf-8", errors="replace",
         )
         return target.exists() and target.stat().st_size > 0
     except Exception:  # noqa: BLE001

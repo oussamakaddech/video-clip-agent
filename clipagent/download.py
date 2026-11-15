@@ -95,7 +95,9 @@ def download(
         audio_only=audio_only,
         sections=sections,
     )
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(
+        command, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     if result.returncode != 0:
         tail = (result.stderr or "").strip().splitlines()[-8:]
         raise DownloadError("Téléchargement impossible :\n" + "\n".join(tail))

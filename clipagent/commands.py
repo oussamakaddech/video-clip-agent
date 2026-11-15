@@ -294,7 +294,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"Python        : {platform.python_version()} ({platform.system()})")
     try:
         ffmpeg = resolve_ffmpeg()
-        version = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True).stdout.splitlines()[0]
+        version = subprocess.run(
+            [ffmpeg, "-version"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        ).stdout.splitlines()[0]
         print(f"ffmpeg        : OK — {version}")
     except Exception as exc:  # noqa: BLE001
         print(f"ffmpeg        : MANQUANT — {exc}")

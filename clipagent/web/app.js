@@ -298,8 +298,27 @@
     box.innerHTML = "";
     $("m-clips").textContent = String((result?.clips || []).length);
 
+    // Les avertissements sont affichés : sinon l'utilisateur ne comprend pas
+    // pourquoi une tâche peut finir sans extrait.
+    const warnings = (result && result.warnings) || [];
+    if (warnings.length) {
+      const banner = document.createElement("div");
+      banner.className = "banner";
+      banner.innerHTML = warnings.map((w) => `<div>⚠ ${escapeHtml(w)}</div>`).join("");
+      box.appendChild(banner);
+    }
+
     if (!result || !result.clips || result.clips.length === 0) {
-      box.innerHTML = '<div class="empty">Aucun extrait produit.</div>';
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.innerHTML = `
+        Aucun extrait produit.<br><br>
+        <span style="font-size:12px">
+          Causes fréquentes : la vidéo ne contient pas de parole (ambiance, musique seule),
+          la transcription est vide, ou le contenu ne présente pas de moment marquant.<br>
+          Essayez une autre source, ou le style <b>tiktok</b> avec un hook forcé.
+        </span>`;
+      box.appendChild(empty);
       return;
     }
 
