@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from clipagent.config import Settings
 from clipagent.model_picker import (
     PROBE_TOOLS,
@@ -25,8 +23,6 @@ def test_param_size_extraction():
 
 
 def test_candidate_models_excludes_non_chat(monkeypatch):
-    import clipagent.model_picker as picker
-
     monkeypatch.setattr(
         "clipagent.service.list_models",
         lambda settings=None: [

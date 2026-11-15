@@ -60,6 +60,8 @@ complète n'est jamais téléchargée.
 | `styles.py` | styles visuels (tiktok, streamer, arabic…) | ~280 |
 | `hooks.py` | accroche TikTok (nettoyage, découpage) | ~125 |
 | `subtitles.py` | génération ASS (2 styles, 2 référentiels de temps) | ~150 |
+| `model_picker.py` | **sélection automatique du modèle** (sonde + classement) | ~260 |
+| `service.py` | couche de service (CLI + API), comparaison de styles | ~430 |
 
 ## Commandes
 ```powershell
@@ -83,9 +85,15 @@ complète n'est jamais téléchargée.
   l'appel LLM est déporté dans un thread (`llm._run_agent_sync`).
 - Le tracing du SDK vise l'API OpenAI → `OPENAI_AGENTS_DISABLE_TRACING=1` avec un
   endpoint tiers.
+- Les modèles « raisonneurs » (Nemotron) **consomment tous les tokens en
+  réflexion** avant d'appeler un outil : budget ≤ 300 tokens ⇒ faux négatif.
+  Sondage : `max_tokens=1024` + `enable_thinking: false` (NVIDIA).
 - Les webm n'ont pas de durée lisible (`Duration: N/A`) → échantillonner le
   début du fragment, ne pas lire la durée.
 - Une frame d'extraction périmée fausse la détection de visage → supprimer le
   fichier **avant** extraction.
 - Les avertissements d'un plan JSON ne doivent pas être rejoués au run suivant.
 - `Set-Content -Encoding UTF8` (PowerShell) écrit un BOM → lire en `utf-8-sig`.
+- Les fichiers `/static` doivent être servis **sans cache** (le navigateur
+  garde une version périmée du front).
+- Les tâches vivent **en mémoire** : un redémarrage du serveur les perd.
