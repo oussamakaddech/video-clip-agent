@@ -396,7 +396,12 @@ def create_app(output_root: str | Path = "output") -> FastAPI:
                     "exists": bool(path and path.exists()),
                 }
             )
-        return {"files": files, "output_dir": str(job.output_dir) if job.output_dir else None}
+        best_of = _find(job.output_dir, "best_of.mp4")
+        return {
+            "files": files,
+            "best_of": bool(best_of),
+            "output_dir": str(job.output_dir) if job.output_dir else None,
+        }
 
     @app.patch("/api/jobs/{job_id}/style")
     def set_style(job_id: str, payload: dict) -> dict:

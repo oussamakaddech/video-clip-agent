@@ -364,6 +364,9 @@
             badge.title = "Poids du fichier";
           }
         });
+        // Le bouton Best-of n'est proposé que si la vidéo existe.
+        const bestLink = box.querySelector('.best a[href*="best-of"]');
+        if (bestLink && !data.best_of) bestLink.remove();
       })
       .catch(() => {});
 
