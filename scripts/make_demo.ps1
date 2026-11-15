@@ -1,4 +1,4 @@
-<#
+﻿<#
     Génère une vidéo de démonstration (banc de couleurs + tonalité) pour
     tester le rendu sans film réel.
 

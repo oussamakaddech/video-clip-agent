@@ -1,4 +1,4 @@
-<#
+﻿<#
     Fabrique une vidéo de démonstration AVEC de la parole française (voix Windows
     Hortense) : permet de valider toute la chaîne (transcription -> agent ->
     rendu) sans film réel.

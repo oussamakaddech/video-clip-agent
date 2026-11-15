@@ -1,4 +1,4 @@
-<#
+﻿<#
     Prépare l'environnement de développement du projet clipagent.
 
     Usage :
