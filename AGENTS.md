@@ -29,8 +29,9 @@ complète n'est jamais téléchargée.
    (`build_*` vs `render_*`) → testables sans binaire externe.
 3. **Import du SDK OpenAI différé** (`agents`, `imageio_ffmpeg`, `faster_whisper`,
    `cv2`) : la suite de tests doit passer même sans ces dépendances.
-4. **Repli sans clé API** : `heuristic_proposals`. Le pipeline ne doit jamais
-   échouer à cause du LLM (warning + repli), jamais perdre l'utilisateur.
+4. **Repli sans clé API** : `narrative_proposals` (puis `heuristic_proposals`
+   si la transcription est trop courte). Le pipeline ne doit jamais échouer à
+   cause du LLM (warning + repli), jamais perdre l'utilisateur.
 5. **Deux référentiels de temps** dans l'ASS : `absolute=True` (source complète,
    seek de sortie) et `absolute=False` (fragment téléchargé, temps relatifs au
    fragment). Ne jamais mélanger.
@@ -53,6 +54,7 @@ complète n'est jamais téléchargée.
 | `scoring.py` | classement des fenêtres (mouvement + chat) | ~140 |
 | `chat.py` | chat replay Kick (extraction, densité, contexte) | ~190 |
 | `selection.py` | **validation pure** des extraits | ~430 |
+| `narrative.py` | **découpage narratif** TextTiling (d'après ClipsAI) | ~380 |
 | `ffmpeg.py` | commandes de rendu (coupe, face cam, ASS, netteté) | ~560 |
 | `facecam.py` | détection du visage (OpenCV YuNet, mobilité) | ~260 |
 | `pipeline.py` | pipeline local (plan → rendu → rapport) | ~430 |
@@ -63,12 +65,69 @@ complète n'est jamais téléchargée.
 | `model_picker.py` | **sélection automatique du modèle** (sonde + classement) | ~260 |
 | `service.py` | couche de service (CLI + API), comparaison de styles | ~430 |
 
+## Intégration GTA 6 (`integrations/gtavi/`)
+Copie datée du plugin MIT **gtavi-claudecode** (commit `dd95d39`) : 14 scripts
+(découverte, scoring de moments, rendu 1080x1920, face cam, contrôle avant
+publication) + 16 fiches `SKILL.md` qui sont des **consignes d'agent**, pas du
+code. Analyse complète : `docs/gtavi-claudecode-analyse.md`.
+
+- Toujours passer par le pont `scripts/gta6.py` : il met `ffmpeg` dans le `PATH`
+  (`output/gta6/bin`) et fixe `CLIP_DESK_HOME` (`output/gta6`). Lancer un script
+  amont directement échoue.
+- Deux fonctions seulement sont patchées dans `common.py` (`tool`, `ffprobe`) ;
+  le pont `scripts/compat.py` fournit `ffprobe` via PyAV (absent du poste).
+- `scripts/gta6.py run` ajoute : accroches heuristiques (sans LLM), légendes avec
+  crédit, rapport `report.md`/`report.json`. Rien n'est publié automatiquement.
+- Trouver une source (chaînes vérifiées, fenêtre à télécharger, contrôle des
+  sous-titres incrustés) : `docs/sources-gta6.md` + `scripts/yt_search.py`,
+  `scripts/yt_window.py`, `scripts/audio_energy.py`.
+- Trois cadrages : `fill` (jeu plein cadre), `blur` (16:9 sur fond flou) et
+  `facecam` (caméra du streamer en haut 1080x608, jeu dessous). La boîte caméra
+  vient de la détection YuNet de l'upstream (`--cam auto`) ou de `--cam x:y:w:h`.
+
+## Intégration ClipsAI (`integrations/clipsai/`)
+Copie datée du dépôt MIT **clipsai** (commit `8e73c8a`, v0.2.1) : référence
+seulement, **le code amont ne tourne pas ici** (`whisperx` + `torch` +
+`sentence-transformers` + `pyannote` ≈ 3 Go, jeton Hugging Face). Analyse :
+`docs/clipsai-analyse.md`.
+
+- Ce qui est repris est **l'algorithme** : `clipagent/narrative.py` réimplémente
+  le TextTiling (frontières de sujet) et la fusion hiérarchique de `ClipFinder`
+  sur des vecteurs lexicaux, sans aucune dépendance.
+- Deux écarts assumés : la **pause** entre deux phrases entre dans le score de
+  cohésion (des vecteurs lexicaux disjoints donnent sinon 0 partout, donc
+  aucune frontière), et une **cascade de seuils** (`high` → `average` → `low`)
+  évite de fusionner toute la vidéo en un seul extrait.
+- Sélection : `--selection auto|llm|narrative|heuristic` (`CLIPAGENT_SELECTION`).
+  `auto` = LLM si clé API, sinon narratif, sinon heuristique.
+
+## Shorts scriptés (`scripts/gta6_short.py`)
+Le short de référence `youtube.com/shorts/uz-Iq7nCfnA` (Viceprint, 57 s, 11,8 M
+de vues) n'est **pas un extrait de VOD** : c'est un montage scripté — voix off
+continue, plans de 1 à 3 s, un texte plein cadre par phrase, CTA final. Reproduit
+par `scripts/gta6_short.py` (spec JSON) + `scripts/tts.ps1` (System.Speech, hors
+ligne). Analyse et mode d'emploi : `docs/gta6-shorts.md`.
+
+- **La voix commande le montage** : chaque phrase est synthétisée d'abord, sa
+  durée réelle devient celle du plan (+ 0,22 s). Le texte et l'image ne peuvent
+  pas se désynchroniser.
+- `plan_shots` / `build_ass` / `build_command` sont purs et testés
+  (`tests/test_gta6_short.py`) : aucun binaire, aucune synthèse en test.
+- Le crédit est placé **sous** le logo du streamer (y=262), sinon les deux se
+  superposent.
+
 ## Commandes
 ```powershell
-.\.venv\Scripts\python.exe -m pytest                      # 120 tests
+.\.venv\Scripts\python.exe -m pytest                      # 222 tests
 .\.venv\Scripts\python.exe -m clipagent doctor            # diagnostic env
+.\.venv\Scripts\python.exe -m clipagent plan --transcript v.srt --selection narrative --min-clip 25 --max-clip 60
 .\.venv\Scripts\python.exe -m clipagent browse --url <vOD> --style tiktok
 .\.venv\Scripts\python.exe -m clipagent finalize --plan output\clips_plan.json --fragments output\work
+.\.venv\Scripts\python.exe scripts\gta6.py setup           # ffmpeg/yt-dlp/whisper + espace de travail
+.\.venv\Scripts\python.exe scripts\gta6.py trends --hours 24
+.\.venv\Scripts\python.exe scripts\gta6.py run "<url>" --clips 3 --max-minutes 25 --layout fill
+.\.venv\Scripts\python.exe scripts\gta6.py style output\gta6\jobs\<id> --pick 3 --hook "He walked into gator water" --cta "Follow for more GTA 6"
+.\.venv\Scripts\python.exe scripts\gta6_short.py --spec output\gta6\shorts\<spec>.json --out output\gta6\shorts\<nom>.mp4
 ```
 
 ## Environnement
@@ -97,3 +156,20 @@ complète n'est jamais téléchargée.
 - Les fichiers `/static` doivent être servis **sans cache** (le navigateur
   garde une version périmée du front).
 - Les tâches vivent **en mémoire** : un redémarrage du serveur les perd.
+- `imageio-ffmpeg` ne fournit **que ffmpeg** (pas ffprobe), et yt-dlp exige un
+  exécutable nommé `ffmpeg.exe` dans le `PATH` (sinon il refuse
+  `--download-sections` et le muxing) → le pont `scripts/gta6.py` crée
+  `output/gta6/bin/ffmpeg.exe` (lien dur) et fournit `ffprobe` via PyAV.
+- Les scripts amont de `integrations/gtavi/` appellent `sys.exit()` au premier
+  échec : les lancer en **sous-processus**, sinon une erreur réseau tue
+  l'orchestrateur au milieu du pipeline.
+- La parole se chevauche parfois dans une transcription : deux groupes de
+  sous-titres au même point d'ancrage s'impriment l'un sur l'autre
+  (`THAT'SGOINGTO`) → borner chaque groupe au début du suivant
+  (`scripts/gta6_style.py`).
+- Les rediffusions YouTube portent souvent leurs **propres sous-titres incrustés**
+  en bas du cadre : `--trim-bottom` (style GTA 6) les retire avant le cadrage,
+  sinon ils se superposent aux nôtres. Attention, trimer **remonte** le reste du
+  cadre : `trim = 1 - (haut de la bande de texte)`. Sur la VOD Speed (bande à
+  84 %), `0.08` ne suffisait pas — il faut `0.17`. Les VOD **officielles** n'ont
+  pas ce problème : préférer la chaîne du streamer aux reuploads.

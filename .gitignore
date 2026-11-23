@@ -25,6 +25,10 @@ downloads/
 *.png
 !docs/*.png
 
+# Clips générés (hors références pour analyse)
+output/gta6/clips-*/
+output/gta6/shorts/
+
 # Outils
 .pytest_cache/
 .ruff_cache/

@@ -461,6 +461,32 @@ VOD 3 h
 | **Fenêtres espacées** | les candidats couvrent toute la durée du live, pas seulement le début |
 | **Score composite** | le classement combine image **et** communauté, pas seulement le mouvement |
 
+### Sélection narrative (TextTiling, d'après ClipsAI)
+
+Sans clé API, l'agent ne découpe plus au hasard : il cherche les **changements
+de sujet** dans la transcription et pose les bornes sur des fins de phrases.
+L'algorithme est le TextTiling de ClipsAI (`docs/clipsai-analyse.md`), porté en
+Python pur — aucun modèle, aucun réseau, quelques millisecondes.
+
+```powershell
+# forcer le découpage narratif (sans LLM)
+clipagent plan --transcript v.srt --selection narrative --min-clip 25 --max-clip 60
+
+# comparer deux stratégies sur la même transcription
+clipagent plan --transcript v.srt --selection heuristic
+clipagent plan --transcript v.srt --selection narrative
+```
+
+| `--selection` | Comportement |
+|---|---|
+| `auto` (défaut) | LLM si `OPENAI_API_KEY`, sinon narratif, sinon heuristique |
+| `llm` | agent uniquement (repli narratif si l'agent échoue) |
+| `narrative` | TextTiling uniquement |
+| `heuristic` | fenêtre glissante (ancien repli, conservé pour comparer) |
+
+Le mode retenu apparaît dans le rapport : `mode: llm`, `narrative`, `heuristic`
+ou `visuel`.
+
 ### Re-sélectionner sans rien re-capturer
 
 Le transcript des fenêtres retenues est sauvegardé (`candidates.srt`) : on peut
@@ -491,12 +517,13 @@ puis assemblage des meilleurs segments consécutifs.
 ## 5. Tests
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m pytest      # 228 tests
 ```
 
-La suite couvre le parsing SRT/VTT, la validation des clips, la construction
-des commandes FFmpeg et l'orchestration du pipeline (aucun appel réseau, aucun
-binaire externe requis).
+La suite couvre le parsing SRT/VTT, la validation des clips, le découpage
+narratif, la construction des commandes FFmpeg, l'orchestration du pipeline et
+la boîte à outils GTA 6 (styles, cadrages, montage scripté) — aucun appel réseau,
+aucun binaire externe requis.
 
 ## 6. Structure
 
@@ -506,6 +533,7 @@ clipagent/
 ├── models.py      # Segment / ClipProposal / Clip
 ├── transcript.py  # lecture SRT/VTT, fenêtrage, export
 ├── selection.py   # validation pure (bornes, durées, doublons, heuristique)
+├── narrative.py   # découpage narratif TextTiling (d'après ClipsAI)
 ├── llm.py         # agent OpenAI Agents SDK + outils
 ├── ffmpeg.py      # sonde, coupe, recadrage, sous-titres, concat
 ├── pipeline.py    # orchestration + rapport
@@ -522,3 +550,84 @@ clipagent/
 * **Modèles locaux** : le SDK Agents accepte d'autres fournisseurs via
   `LiteLLM` (`--model openai/...`, `--model anthropic/...` avec les variables
   d'environnement correspondantes).
+
+## 8. Boîte à outils GTA 6 (`scripts/`)
+
+Un second atelier, orienté **contenu gaming** : il prend une VOD de stream (ou
+une fenêtre déjà téléchargée), trouve les moments, et rend des clips verticaux
+habillés « Vice City » — avec ou sans le visage du streamer.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\gta6.py setup     # ffmpeg, yt-dlp, Whisper, espace de travail
+.\.venv\Scripts\python.exe scripts\gta6.py doctor    # diagnostic de l'environnement
+.\.venv\Scripts\python.exe scripts\gta6.py trends --hours 24
+.\.venv\Scripts\python.exe scripts\gta6.py run "<url>" --clips 3 --style gta6 --cta "Follow for more GTA 6"
+.\.venv\Scripts\python.exe scripts\gta6.py style output\gta6\jobs\<id> --pick 1 --hook "He walked into gator water"
+.\.venv\Scripts\python.exe scripts\gta6.py check output\gta6\jobs\<id>\edits\clip_1_gta6.mp4
+```
+
+### Le style GTA 6
+
+Pastille `GTA 6` animée, accroche blanche à contour noir et ombre rose,
+sous-titres **karaoké** (mot actif rose `#FF2E88`), étalonnage (+10 % saturation,
++5 % contraste, vignettage), CTA de fin. Trois cadrages :
+
+| `--layout` | Image | Quand |
+|---|---|---|
+| `fill` | jeu plein cadre 9:16 | action centrée |
+| `blur` | 16:9 entier sur fond flou | plans larges, dialogue |
+| `facecam` | **caméra du streamer en haut** (1080×608) + jeu dessous | le visage doit être dans le clip |
+
+```powershell
+# le visage du streamer, détecté automatiquement (OpenCV / YuNet)
+.\.venv\Scripts\python.exe scripts\gta6.py style output\gta6\jobs\<id> --pick 1 `
+  --layout facecam --hook "He stole a car at gunpoint" --cta "Follow for more GTA 6"
+
+# transcription illisible (dialecte) : pas de sous-titres plutôt que du bruit
+… --layout facecam --captions none
+```
+
+`--cam auto` détecte le visage puis élargit la boîte de 15 % vers le haut
+(bonnet, écouteurs, menton) ; `--cam x:y:w:h` la force. `--trim-bottom 0.17`
+retire les sous-titres déjà incrustés dans une rediffusion.
+
+### Shorts scriptés (voix off + texte plein cadre)
+
+Pour reproduire le format des guides GTA 6 viraux (voix off continue, plans de
+1 à 3 s, un texte par phrase, CTA final) :
+
+```powershell
+.\.venv\Scripts\python.exe scripts\gta6_short.py `
+  --spec output\gta6\shorts\<spec>.json --out output\gta6\shorts\<nom>.mp4
+```
+
+La spec décrit des *beats* (plan source + phrase + label). **La voix commande le
+montage** : chaque phrase est synthétisée d'abord (`scripts/tts.ps1`,
+System.Speech, hors ligne), sa durée réelle devient celle du plan. Aucun
+désynchronisation possible entre texte et image.
+
+### Trouver une source
+
+```powershell
+.\.venv\Scripts\python.exe scripts\yt_search.py "gta 6 stream" --limit 10
+.\.venv\Scripts\python.exe scripts\yt_probe.py "https://www.youtube.com/watch?v=<id>"
+.\.venv\Scripts\python.exe scripts\yt_window.py <video> --from 4h30 --to 4h50
+.\.venv\Scripts\python.exe scripts\audio_energy.py output\gta6\sources
+```
+
+`yt_probe.py` liste les formats disponibles (résolution, fps, poids) avant de
+télécharger ; `audio_energy.py` classe les fenêtres par énergie sonore pour
+repérer l'action sans regarder des heures de VOD.
+
+### Documentation
+
+| Fichier | Contenu |
+|---|---|
+| `docs/gtavi-claudecode-analyse.md` | analyse de l'intégration amont (MIT) |
+| `docs/clipsai-analyse.md` | ce qui est repris de ClipsAI (TextTiling) |
+| `docs/gta6-style.md` | anatomie du style, cadrages, pièges |
+| `docs/gta6-shorts.md` | format « Viceprint », moteur de montage scripté |
+| `docs/sources-gta6.md` | chaînes vérifiées, procédure de sondage |
+
+Rien n'est publié automatiquement : chaque clip sort avec un **crédit du
+créateur** et une légende prête à publier.
